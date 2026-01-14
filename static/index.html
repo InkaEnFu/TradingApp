@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Investment Simulator</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>Investment Simulator</h1>
+            <nav>
+                <a href="#market" id="nav-market">Market</a>
+                <a href="#portfolio" id="nav-portfolio">Portfolio</a>
+            </nav>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="card" id="view-market">
+            <h2>Market Trading</h2>
+            
+            <div class="form-group">
+                <label for="symbol">Symbol</label>
+                <input id="symbol" type="text" placeholder="AAPL">
+            </div>
+            
+            <button onclick="loadPrice()">Get Price</button>
+            
+            <p id="price"></p>
+            
+            <div class="form-group">
+                <label for="amount">Amount</label>
+                <input id="amount" type="number" value="1" min="1">
+            </div>
+            
+            <button onclick="buy()">Buy</button>
+            <button onclick="sell()">Sell</button>
+            
+            <p id="status"></p>
+        </div>
+        <div class="card" style="margin-top:2rem;" id="view-market-categories">
+            <h2>Shares by Categories</h2>
+            <div id="stocks-categories"></div>
+        </div>
+
+        <div class="card" id="view-portfolio" style="display:none;">
+            <h2>Your Portfolio</h2>
+            <div id="portfolio-summary" style="margin-bottom: 20px;">
+                <h3>Hodnota portfolia momentálně: <span id="total-value">-</span></h3>
+                <p style="font-size: 1.2em;">
+                    Za posledních 24 hodin: 
+                    <span id="change-24h" style="font-weight: bold;">-</span>
+                    (<span id="change-24h-percent" style="font-weight: bold;">-</span>)
+                </p>
+                <div style="margin-top: 20px;">
+                    <canvas id="portfolio-chart" style="max-height: 300px;"></canvas>
+                </div>
+            </div>
+            <div id="portfolio"></div>
+        </div>
+    </div>
+
+    <!-- Stock Detail Modal -->
+    <div id="stock-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="modal-close" onclick="closeStockModal()">&times;</span>
+            <div class="modal-header">
+                <h2 id="modal-symbol">-</h2>
+                <div class="modal-price">
+                    <span id="modal-current-price">-</span>
+                </div>
+            </div>
+            <div class="modal-change">
+                <span id="modal-change">-</span>
+                <span id="modal-change-percent">(-)</span>
+            </div>
+            <div class="modal-period-buttons">
+                <button class="period-btn active" data-period="1d">1D</button>
+                <button class="period-btn" data-period="1w">1T</button>
+                <button class="period-btn" data-period="1m">1M</button>
+                <button class="period-btn" data-period="1y">1R</button>
+            </div>
+            <div class="modal-chart-container">
+                <canvas id="stock-modal-chart"></canvas>
+            </div>
+            <div id="modal-loading" style="display: none; text-align: center; padding: 2rem;">
+                Načítání...
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/static/script.js"></script>
+    <script>
+      // Lightweight client-side router for SPA switching without reload
+            function showView(hash) {
+        const marketVisible = !hash || hash === '#market';
+        document.getElementById('view-market').style.display = marketVisible ? '' : 'none';
+        document.getElementById('view-market-categories').style.display = marketVisible ? '' : 'none';
+        document.getElementById('view-portfolio').style.display = marketVisible ? 'none' : '';
+
+        // Active link styling
+        document.getElementById('nav-market').classList.toggle('active', marketVisible);
+        document.getElementById('nav-portfolio').classList.toggle('active', !marketVisible);
+
+                if (!marketVisible) {
+                    // Force refresh portfolio when user navigates to it
+                    invalidateCache(['portfolio','portfolioHistory']);
+                    loadPortfolio(true);
+        } else {
+          // Load categories once (script.js uses cache)
+          loadStocksByCategory();
+        }
+      }
+
+            window.addEventListener('hashchange', () => showView(location.hash));
+            window.addEventListener('DOMContentLoaded', () => {
+                showView(location.hash || '#market');
+            });
+    </script>
+</body>
+</html>

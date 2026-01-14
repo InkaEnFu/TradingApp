@@ -1,0 +1,56 @@
+VSTUPNÍ BOD (Root)
+      +-------------------+
+      |      run.py       | --- Spouští Uvicorn server a otevírá prohlížeč
+      +---------+---------+
+                |
+                v
+      +-------------------+
+      |  requirements.txt | --- Seznam knihoven (FastAPI, yfinance, atd.)
+      +-------------------+
+                |
+                v
+       BACKEND (Složka app/)                          FRONTEND (Složka static/)
++-------------------------------+             +----------------------------------+
+|          main.py              |             |          index.html              |
+| (Hlavní router a SPA navigace)|<---HTTP---->| (Základní struktura a SPA přepínač)|
+|               |    JSON     |               |
++---------------+---------------+             +-----------------+----------------+
+      |         |                                     |         |
+      |         |        +----------------------------+         |
+      |         |        |                                      |
+      |   +-----v--------v----------+                 +---------v----------+
+      |   |      script.js          |                 |     style.css      |
+      |   | (Logic, Charts, Cache)  |                 | (Vizuální design)  |
+      |   |       |                 |  |
+      |   +-------------------------+                 +--------------------+
+      |                                                         |
+      |   +-------------------------+                 +---------v----------+
+      |   |   technology_api.py     |                 |   portfolio.html   |
+      |   | (API pro sektory akcií) |                 | (Záložní šablona)  |
+      |   ||                 ||
+      |   +------------+------------+                 +--------------------+
+      |                |
+      v                v
++-------------------------------+             EXTERNÍ SVĚT
+|        portfolio.py           |             +-----------------------+
+| (Obchody a výpočty zisku)     |-----------> |    Yahoo Finance      |
+|          |             |   (API přes yfinance) |
++---------------+---------------+             |     |
+      |         |                             +-----------+-----------+
+      |   +-----v----------+                              |
+      |   |    prices.py   | <----------------------------+
+      |   | (Stahování cen)|
+      |   ||
+      |   +----------------+
+      |
+      v
++-------------------------------+             KONFIGURACE & DATA
+|        database.py            |             +-----------------------+
+| (Správa SQL připojení)        |-----------> |  stock_categories.py  |
+|           |             | (Seznamy akcií/sektorů)|
++---------------+---------------+             ||
+                |                             +-----------------------+
+                v
+      +-------------------+
+      |   portfolio.db    | --- Soubor SQLite databáze (holdings, history)
+      +-------------------+
