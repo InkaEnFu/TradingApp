@@ -34,5 +34,26 @@ stocks_by_category = {
         {"symbol": "GOOGL", "name": "Alphabet Inc."},
         {"symbol": "META", "name": "Meta Platforms Inc."},
         {"symbol": "AMD", "name": "Advanced Micro Devices"}
+    ],
+    "Cryptocurrency": [
+        {"symbol": "BTC-USD", "name": "Bitcoin"},
+        {"symbol": "ETH-USD", "name": "Ethereum"},
+        {"symbol": "BNB-USD", "name": "Binance Coin"},
+        {"symbol": "SOL-USD", "name": "Solana"},
+        {"symbol": "XRP-USD", "name": "Ripple"}
+    ],
+    "Forex": [
+        {"symbol": "EURUSD=X", "name": "EUR/USD"},
+        {"symbol": "GBPUSD=X", "name": "GBP/USD"},
+        {"symbol": "JPY=X", "name": "USD/JPY"},
+        {"symbol": "AUDUSD=X", "name": "AUD/USD"},
+        {"symbol": "CADUSD=X", "name": "CAD/USD"}
+    ],
+    "Commodities": [
+        {"symbol": "GC=F", "name": "Gold Futures"},
+        {"symbol": "CL=F", "name": "Crude Oil WTI"},
+        {"symbol": "SI=F", "name": "Silver Futures"},
+        {"symbol": "NG=F", "name": "Natural Gas"},
+        {"symbol": "HG=F", "name": "Copper Futures"}
     ]
 }

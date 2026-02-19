@@ -17,108 +17,284 @@
         </div>
     </header>
 
-    <div class="container">
-        <div class="card" id="view-market">
-            <h2>Market Trading</h2>
-            
-            <div class="form-group">
-                <label for="symbol">Symbol</label>
-                <input id="symbol" type="text" placeholder="AAPL">
-            </div>
-            
-            <button onclick="loadPrice()">Get Price</button>
-            
-            <p id="price"></p>
-            
-            <div class="form-group">
-                <label for="amount">Amount</label>
-                <input id="amount" type="number" value="1" min="1">
-            </div>
-            
-            <button onclick="buy()">Buy</button>
-            <button onclick="sell()">Sell</button>
-            
-            <p id="status"></p>
-        </div>
-        <div class="card" style="margin-top:2rem;" id="view-market-categories">
-            <h2>Shares by Categories</h2>
-            <div id="stocks-categories"></div>
-        </div>
-
-        <div class="card" id="view-portfolio" style="display:none;">
-            <h2>Your Portfolio</h2>
-            <div id="portfolio-summary" style="margin-bottom: 20px;">
-                <h3>Hodnota portfolia momentálně: <span id="total-value">-</span></h3>
-                <p style="font-size: 1.2em;">
-                    Za posledních 24 hodin: 
-                    <span id="change-24h" style="font-weight: bold;">-</span>
-                    (<span id="change-24h-percent" style="font-weight: bold;">-</span>)
-                </p>
-                <div style="margin-top: 20px;">
-                    <canvas id="portfolio-chart" style="max-height: 300px;"></canvas>
-                </div>
-            </div>
-            <div id="portfolio"></div>
+    <!-- ========== Balance Bar ========== -->
+    <div class="balance-bar">
+        <div class="container balance-bar-inner">
+            <div class="balance-item"><span class="balance-label">Cash</span><span class="balance-value" id="bar-cash">$100,000</span></div>
+            <div class="balance-item"><span class="balance-label">Invested</span><span class="balance-value" id="bar-invested">$0</span></div>
+            <div class="balance-item"><span class="balance-label">Total</span><span class="balance-value" id="bar-total">$100,000</span></div>
+            <div class="balance-item"><span class="balance-label">P&L</span><span class="balance-value" id="bar-pnl">$0 (0%)</span></div>
         </div>
     </div>
 
-    <!-- Stock Detail Modal -->
-    <div id="stock-modal" class="modal" style="display: none;">
+    <div class="container">
+        <!-- ========== MARKET VIEW ========== -->
+        <div id="view-market">
+            <!-- Trading Panel -->
+            <div class="card">
+                <h2>Trading</h2>
+                <div class="trading-grid">
+                    <div class="trading-left">
+                        <div class="form-group">
+                            <label for="symbol">Symbol</label>
+                            <input id="symbol" type="text" placeholder="AAPL, BTC-USD, GC=F...">
+                        </div>
+                        <button class="btn-secondary" onclick="loadPrice()">Get Price</button>
+                        <p id="price"></p>
+                    </div>
+                    <div class="trading-right">
+                        <div class="form-group">
+                            <label for="order-type">Order Type</label>
+                            <select id="order-type" onchange="onOrderTypeChange()">
+                                <option value="market">Market Order</option>
+                                <option value="target_buy">Target Buy</option>
+                                <option value="target_sell">Target Sell</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="target-price-group" style="display:none;">
+                            <label for="target-price">Target Price ($)</label>
+                            <input id="target-price" type="number" step="0.01" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label for="amount">Amount (shares/units)</label>
+                            <input id="amount" type="number" value="1" min="0.0001" step="any">
+                        </div>
+                        <p class="fee-info">Fee: 0.1% per trade</p>
+                        <div class="trade-buttons">
+                            <button class="btn-buy" onclick="executeTrade('buy')">Buy</button>
+                            <button class="btn-sell" onclick="executeTrade('sell')">Sell</button>
+                        </div>
+                        <p id="status"></p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Asset Categories -->
+            <div class="card" id="view-market-categories">
+                <h2>Assets</h2>
+                <div class="category-tabs" id="category-tabs"></div>
+                <div id="stocks-categories"></div>
+            </div>
+
+            <!-- Backtesting -->
+            <div class="card">
+                <h2>Backtesting (Historical Simulation)</h2>
+                <p class="text-muted" style="margin-bottom:1rem;">Select a date in the past and see how your investment would have performed.</p>
+                <div class="backtest-grid">
+                    <div class="form-group">
+                        <label for="bt-symbol">Symbol</label>
+                        <input id="bt-symbol" type="text" placeholder="AAPL">
+                    </div>
+                    <div class="form-group">
+                        <label for="bt-date">Start Date</label>
+                        <input id="bt-date" type="date" value="2021-01-01">
+                    </div>
+                    <div class="form-group">
+                        <label for="bt-investment">Investment ($)</label>
+                        <input id="bt-investment" type="number" value="10000" min="1">
+                    </div>
+                </div>
+                <button onclick="runBacktest()">Run Simulation</button>
+                <div id="bt-result"></div>
+                <div id="bt-chart-container" style="display:none; margin-top:1rem;">
+                    <canvas id="bt-chart" style="max-height:300px;"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== PORTFOLIO VIEW ========== -->
+        <div id="view-portfolio" style="display:none;">
+            <!-- Dashboard Stats -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h3>Total Value</h3>
+                    <div class="value" id="total-value">-</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Cash Balance</h3>
+                    <div class="value" id="cash-balance">-</div>
+                </div>
+                <div class="stat-card">
+                    <h3>24h Change</h3>
+                    <div class="value" id="change-24h">-</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Win Rate</h3>
+                    <div class="value" id="win-rate">-</div>
+                </div>
+            </div>
+
+            <!-- Portfolio value chart -->
+            <div class="card">
+                <h2>Portfolio Value (24h)</h2>
+                <canvas id="portfolio-chart" style="max-height:300px;"></canvas>
+            </div>
+
+            <!-- Pending Orders -->
+            <div class="card" id="orders-section">
+                <h2>Pending Orders</h2>
+                <div id="pending-orders"><p class="text-muted">No pending orders.</p></div>
+            </div>
+
+            <!-- Open Positions -->
+            <div class="card">
+                <h2>Open Positions</h2>
+                <div id="portfolio"></div>
+            </div>
+
+            <!-- Asset Allocation -->
+            <div class="card">
+                <h2>Asset Allocation</h2>
+                <div id="allocation-map" class="allocation-map"></div>
+            </div>
+
+            <!-- Pies -->
+            <div class="card">
+                <h2>Pies (Auto-Invest)</h2>
+                <p class="text-muted" style="margin-bottom:1rem;">Create a pie with stocks and percentages. Then invest a dollar amount and it auto-buys according to the allocation.</p>
+
+                <!-- Create Pie Form -->
+                <div style="border:1px solid var(--border-color); border-radius:12px; padding:1.5rem; margin-bottom:1.5rem;">
+                    <h3 style="color:var(--light-purple); margin-bottom:1rem;">Create New Pie</h3>
+                    <div class="form-group">
+                        <label for="pie-name">Pie Name</label>
+                        <input id="pie-name" type="text" placeholder="e.g. Tech Mix">
+                    </div>
+                    <div id="pie-slices-builder">
+                        <div class="pie-slice-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+                            <input type="text" placeholder="Symbol (e.g. AAPL)" class="pie-symbol" style="flex:2;">
+                            <input type="number" placeholder="%" class="pie-percent" min="1" max="100" style="flex:1;">
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:0.5rem; margin-top:0.5rem;">
+                        <button class="btn-secondary btn-sm" onclick="addPieSliceRow()">+ Add Stock</button>
+                        <span id="pie-total-pct" style="color:var(--text-muted); align-self:center; margin-left:auto;">Total: 0%</span>
+                    </div>
+                    <div style="margin-top:1rem;">
+                        <button onclick="createPie()">Create Pie</button>
+                    </div>
+                    <p id="pie-create-status" style="margin-top:0.5rem;"></p>
+                </div>
+
+                <!-- Existing Pies -->
+                <div id="pies-list"></div>
+            </div>
+
+            <!-- Trade History -->
+            <div class="card">
+                <h2>Trade History</h2>
+                <div id="trade-history"><p class="text-muted">No trades yet.</p></div>
+            </div>
+
+            <!-- Trade Statistics -->
+            <div class="card">
+                <h2>Trade Statistics</h2>
+                <div class="stats-grid" id="trade-stats-grid">
+                    <div class="stat-card"><h3>Total Trades</h3><div class="value" id="stat-total-trades">0</div></div>
+                    <div class="stat-card"><h3>Winning Trades</h3><div class="value positive" id="stat-wins">0</div></div>
+                    <div class="stat-card"><h3>Losing Trades</h3><div class="value negative" id="stat-losses">0</div></div>
+                    <div class="stat-card"><h3>Total P&L</h3><div class="value" id="stat-total-pnl">$0</div></div>
+                    <div class="stat-card"><h3>Total Fees Paid</h3><div class="value" id="stat-total-fees">$0</div></div>
+                </div>
+            </div>
+
+            <!-- Reset Button -->
+            <div class="card" style="text-align:center;">
+                <button class="btn-danger" onclick="resetAccount()">Reset Account ($100,000)</button>
+                <p class="text-muted" style="margin-top:0.5rem;">This will delete all holdings, orders, and trade history.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== Stock Detail Modal ========== -->
+    <div id="stock-modal" class="modal" style="display:none;">
         <div class="modal-content">
             <span class="modal-close" onclick="closeStockModal()">&times;</span>
             <div class="modal-header">
                 <h2 id="modal-symbol">-</h2>
-                <div class="modal-price">
-                    <span id="modal-current-price">-</span>
-                </div>
+                <div class="modal-price"><span id="modal-current-price">-</span></div>
             </div>
             <div class="modal-change">
                 <span id="modal-change">-</span>
                 <span id="modal-change-percent">(-)</span>
             </div>
-            <div class="modal-period-buttons">
-                <button class="period-btn active" data-period="1d">1D</button>
-                <button class="period-btn" data-period="1w">1T</button>
-                <button class="period-btn" data-period="1m">1M</button>
-                <button class="period-btn" data-period="1y">1R</button>
+            <div class="modal-controls">
+                <div class="modal-period-buttons">
+                    <button class="period-btn active" data-period="1d">1D</button>
+                    <button class="period-btn" data-period="1w">1W</button>
+                    <button class="period-btn" data-period="1m">1M</button>
+                    <button class="period-btn" data-period="1y">1Y</button>
+                </div>
+                <div class="chart-type-toggle">
+                    <button class="chart-type-btn active" data-type="line" title="Line Chart">Line</button>
+                    <button class="chart-type-btn" data-type="candle" title="Candlestick">Candle</button>
+                </div>
             </div>
             <div class="modal-chart-container">
                 <canvas id="stock-modal-chart"></canvas>
+                <div id="candlestick-container" style="display:none;"></div>
             </div>
-            <div id="modal-loading" style="display: none; text-align: center; padding: 2rem;">
-                Načítání...
+            <div id="modal-loading" style="display:none; text-align:center; padding:2rem;">Loading...</div>
+
+            <!-- Sell Panel -->
+            <div id="modal-sell-panel" style="display:none;">
+                <div class="sell-panel-header">
+                    <h3>Sell <span id="modal-sell-symbol">-</span></h3>
+                    <div class="sell-holding-info">
+                        Holding: <strong id="modal-sell-holding">0</strong> units
+                        &mdash; Value: <strong id="modal-sell-value">$0</strong>
+                    </div>
+                </div>
+                <div class="sell-mode-toggle">
+                    <button class="sell-mode-btn active" data-mode="units" onclick="setSellMode('units')">Units</button>
+                    <button class="sell-mode-btn" data-mode="dollars" onclick="setSellMode('dollars')">Dollars ($)</button>
+                </div>
+                <div class="sell-input-row">
+                    <label id="modal-sell-label">Units to sell:</label>
+                    <input type="number" id="modal-sell-amount" min="0" step="any" placeholder="0" oninput="onSellAmountInput()" />
+                </div>
+                <div class="sell-quick-buttons">
+                    <button onclick="sellQuick(0.25)">25%</button>
+                    <button onclick="sellQuick(0.5)">50%</button>
+                    <button onclick="sellQuick(0.75)">75%</button>
+                    <button onclick="sellQuick(1)">100%</button>
+                </div>
+                <div id="modal-sell-preview" class="sell-preview"></div>
+                <button class="btn-sell-execute" onclick="executeModalSell()">Sell</button>
+                <div id="modal-sell-status" style="margin-top:0.5rem;"></div>
             </div>
+
         </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
     <script src="/static/script.js"></script>
     <script>
-      // Lightweight client-side router for SPA switching without reload
-            function showView(hash) {
-        const marketVisible = !hash || hash === '#market';
-        document.getElementById('view-market').style.display = marketVisible ? '' : 'none';
-        document.getElementById('view-market-categories').style.display = marketVisible ? '' : 'none';
-        document.getElementById('view-portfolio').style.display = marketVisible ? 'none' : '';
-
-        // Active link styling
-        document.getElementById('nav-market').classList.toggle('active', marketVisible);
-        document.getElementById('nav-portfolio').classList.toggle('active', !marketVisible);
-
-                if (!marketVisible) {
-                    // Force refresh portfolio when user navigates to it
-                    invalidateCache(['portfolio','portfolioHistory']);
-                    loadPortfolio(true);
-        } else {
-          // Load categories once (script.js uses cache)
-          loadStocksByCategory();
+        function showView(hash) {
+            const marketVisible = !hash || hash === '#market';
+            document.getElementById('view-market').style.display = marketVisible ? '' : 'none';
+            document.getElementById('view-portfolio').style.display = marketVisible ? 'none' : '';
+            document.getElementById('nav-market').classList.toggle('active', marketVisible);
+            document.getElementById('nav-portfolio').classList.toggle('active', !marketVisible);
+            if (!marketVisible) {
+                invalidateCache(['portfolio','portfolioHistory']);
+                loadPortfolio(true);
+                loadPendingOrders();
+                loadTradeHistory();
+                loadTradeStats();
+                loadPies();
+            } else {
+                loadStocksByCategory();
+            }
+            refreshBalanceBar();
         }
-      }
-
-            window.addEventListener('hashchange', () => showView(location.hash));
-            window.addEventListener('DOMContentLoaded', () => {
-                showView(location.hash || '#market');
-            });
+        window.addEventListener('hashchange', () => showView(location.hash));
+        window.addEventListener('DOMContentLoaded', () => {
+            showView(location.hash || '#market');
+            refreshBalanceBar();
+            setInterval(checkOrders, 30000);
+        });
     </script>
 </body>
 </html>

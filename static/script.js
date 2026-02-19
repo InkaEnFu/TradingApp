@@ -1,503 +1,734 @@
-// Simple in-memory cache with TTLs
-const _cache = {
-    price: new Map(), // key: symbol -> {data, ts}
-    portfolio: null, // {data, ts}
-    portfolioHistory: null // {data, ts}
-};
-
-// localStorage keys pro persistentní cache
-const STORAGE_KEYS = {
-    portfolio: 'cached_portfolio',
-    portfolioHistory: 'cached_portfolioHistory',
-    stocksCategories: 'cached_stocksCategories'
-};
-
-// Uložit data do localStorage
-function saveToStorage(key, data) {
-    try {
-        localStorage.setItem(key, JSON.stringify({ data, ts: Date.now() }));
-    } catch (e) {
-        console.warn('localStorage save failed:', e);
-    }
-}
-
-// Načíst data z localStorage
-function loadFromStorage(key) {
-    try {
-        const item = localStorage.getItem(key);
-        if (item) {
-            return JSON.parse(item);
-        }
-    } catch (e) {
-        console.warn('localStorage load failed:', e);
-    }
-    return null;
-}
-
+// ===== CACHE =====
+const _cache = { price: new Map(), portfolio: null, portfolioHistory: null };
+const STORAGE_KEYS = { portfolio: 'cached_portfolio', portfolioHistory: 'cached_portfolioHistory', stocksCategories: 'cached_stocksCategories' };
+function saveToStorage(k, d) { try { localStorage.setItem(k, JSON.stringify({data:d, ts:Date.now()})); } catch(e){} }
+function loadFromStorage(k) { try { const i=localStorage.getItem(k); if(i) return JSON.parse(i); } catch(e){} return null; }
 function now() { return Date.now(); }
-function minutes(n) { return n * 60 * 1000; }
-function invalidateCache(keys) {
-    if (!keys) return;
-    for (const k of keys) {
-        if (k === 'price') _cache.price.clear();
-        if (k === 'portfolio') _cache.portfolio = null;
-        if (k === 'portfolioHistory') _cache.portfolioHistory = null;
-    }
+function minutes(n) { return n*60*1000; }
+function invalidateCache(keys) { if(!keys) return; for(const k of keys){ if(k==='price') _cache.price.clear(); if(k==='portfolio') _cache.portfolio=null; if(k==='portfolioHistory') _cache.portfolioHistory=null; }}
+
+// ===== BALANCE BAR =====
+async function refreshBalanceBar() {
+    try {
+        const res = await fetch('/api/account');
+        const d = await res.json();
+        const el = (id) => document.getElementById(id);
+        if(el('bar-cash')) el('bar-cash').textContent = '$' + d.cash.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+        if(el('bar-invested')) el('bar-invested').textContent = '$' + d.invested.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+        if(el('bar-total')) el('bar-total').textContent = '$' + d.total.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+        if(el('bar-pnl')) {
+            const prefix = d.profit >= 0 ? '+' : '';
+            el('bar-pnl').textContent = prefix + '$' + d.profit.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' (' + prefix + d.profit_percent + '%)';
+            el('bar-pnl').className = 'balance-value ' + (d.profit >= 0 ? 'positive' : 'negative');
+        }
+    } catch(e) { console.error('Balance bar error:', e); }
 }
 
+// ===== PRICE =====
 async function loadPrice() {
-    const symbolInput = document.getElementById("symbol");
-    const priceEl = document.getElementById("price");
-    if (!symbolInput) return;
-
-    const symbol = symbolInput.value.trim();
-    if (!symbol) {
-        priceEl.innerText = "Please enter a symbol.";
-        return;
-    }
-
+    const symbolInput = document.getElementById('symbol');
+    const priceEl = document.getElementById('price');
+    if(!symbolInput) return;
+    const symbol = symbolInput.value.trim().toUpperCase();
+    if(!symbol) { priceEl.innerText = 'Please enter a symbol.'; return; }
     let data;
     const cached = _cache.price.get(symbol);
-    if (cached && (now() - cached.ts) < minutes(5)) {
-        data = cached.data;
-    } else {
-        const res = await fetch(`/api/price/${symbol}`);
-        data = await res.json();
-        _cache.price.set(symbol, { data, ts: now() });
-    }
-    priceEl.innerHTML = `Price of ${data.symbol}: $${data.price} <a href="#" onclick="openStockModal('${data.symbol}'); return false;" style="color: var(--light-purple); margin-left: 1rem;">📊 Detail</a>`;
+    if(cached && (now()-cached.ts)<minutes(5)) { data = cached.data; }
+    else { const res = await fetch('/api/price/'+symbol); data = await res.json(); _cache.price.set(symbol, {data, ts:now()}); }
+    priceEl.innerHTML = 'Price of '+data.symbol+': $'+data.price+' <a href="#" onclick="openStockModal(\''+data.symbol+'\'); return false;" style="color:var(--light-purple);margin-left:1rem;">Detail</a>';
 }
 
-async function buy() {
-    const symbolInput = document.getElementById("symbol");
-    const amountInput = document.getElementById("amount");
-    const statusEl = document.getElementById("status");
-    if (!symbolInput || !amountInput) return;
-
-    const symbol = symbolInput.value.trim();
-    const amount = parseInt(amountInput.value, 10);
-
-    if (!symbol || isNaN(amount) || amount <= 0) {
-        statusEl.innerText = "Enter valid symbol and amount.";
-        return;
-    }
-
-    await fetch(`/api/buy/${symbol}/${amount}`, { method: "POST" });
-    statusEl.innerText = `Bought ${amount}x ${symbol}.`;
+// ===== ORDER TYPE CHANGE =====
+function onOrderTypeChange() {
+    const ot = document.getElementById('order-type').value;
+    const tpg = document.getElementById('target-price-group');
+    tpg.style.display = (ot === 'market') ? 'none' : 'block';
+    const btnBuy = document.querySelector('.btn-buy');
+    const btnSell = document.querySelector('.btn-sell');
+    if(ot === 'target_sell') { btnBuy.style.display = 'none'; btnSell.style.display = ''; }
+    else if(ot === 'target_buy') { btnSell.style.display = 'none'; btnBuy.style.display = ''; }
+    else { btnBuy.style.display = ''; btnSell.style.display = ''; }
 }
 
-async function sell() {
-    const symbolInput = document.getElementById("symbol");
-    const amountInput = document.getElementById("amount");
-    const statusEl = document.getElementById("status");
-    if (!symbolInput || !amountInput) return;
-
-    const symbol = symbolInput.value.trim();
-    const amount = parseInt(amountInput.value, 10);
-
-    if (!symbol || isNaN(amount) || amount <= 0) {
-        statusEl.innerText = "Enter valid symbol and amount.";
-        return;
-    }
-
-    await fetch(`/api/sell/${symbol}/${amount}`, { method: "POST" });
-    statusEl.innerText = `Sold ${amount}x ${symbol}.`;
+// ===== EXECUTE TRADE =====
+async function executeTrade(action) {
+    const symbol = (document.getElementById('symbol').value || '').trim().toUpperCase();
+    const amount = parseFloat(document.getElementById('amount').value);
+    const orderType = document.getElementById('order-type').value;
+    const targetPrice = parseFloat(document.getElementById('target-price').value) || 0;
+    const statusEl = document.getElementById('status');
+    if(!symbol || isNaN(amount) || amount <= 0) { statusEl.innerText = 'Enter valid symbol and amount.'; return; }
+    if(orderType !== 'market' && targetPrice <= 0) { statusEl.innerText = 'Enter a target price for this order type.'; return; }
+    try {
+        const res = await fetch('/api/trade', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({symbol, action, amount, order_type: orderType, target_price: targetPrice})
+        });
+        const data = await res.json();
+        if(data.error) { statusEl.innerHTML = '<span class="negative">'+data.error+'</span>'; }
+        else { statusEl.innerHTML = '<span class="positive">'+data.message+'</span>'; }
+        invalidateCache(['portfolio']); refreshBalanceBar();
+    } catch(e) { statusEl.innerText = 'Error: '+e.message; }
 }
 
-async function loadPortfolio(force = false) {
-    const container = document.getElementById("portfolio");
-    if (!container) return;
-    
-    // Nejprve zobrazit uložená data z localStorage (okamžitě)
+// ===== PORTFOLIO =====
+async function loadPortfolio(force=false) {
+    const container = document.getElementById('portfolio');
+    if(!container) return;
     const stored = loadFromStorage(STORAGE_KEYS.portfolio);
-    if (stored && !_cache.portfolio) {
-        renderPortfolio(stored.data);
-    }
-    
+    if(stored && !_cache.portfolio) renderPortfolio(stored.data);
     let data;
-    if (!force && _cache.portfolio && (now() - _cache.portfolio.ts) < minutes(1)) {
-        data = _cache.portfolio.data;
-    } else {
-        const res = await fetch("/api/portfolio");
-        data = await res.json();
-        _cache.portfolio = { data, ts: now() };
-        saveToStorage(STORAGE_KEYS.portfolio, data);
-    }
-
+    if(!force && _cache.portfolio && (now()-_cache.portfolio.ts)<minutes(1)) { data = _cache.portfolio.data; }
+    else { const res = await fetch('/api/portfolio'); data = await res.json(); _cache.portfolio = {data, ts:now()}; saveToStorage(STORAGE_KEYS.portfolio, data); }
     renderPortfolio(data);
     await loadPortfolioChart(force);
 }
 
 function renderPortfolio(data) {
-    const container = document.getElementById("portfolio");
-    if (!container) return;
-    
+    const container = document.getElementById('portfolio');
+    if(!container) return;
     const positions = data.positions;
     const totalValue = data.total_value;
+    const cash = data.cash;
     const change24h = data.change_24h;
     const change24hPercent = data.change_24h_percent;
-
-    // Aktualizace celkové hodnoty
-    const totalValueEl = document.getElementById("total-value");
-    if (totalValueEl) {
-        totalValueEl.innerText = `$${totalValue}`;
+    // Update dashboard stats
+    const el = (id) => document.getElementById(id);
+    if(el('total-value')) el('total-value').textContent = '$' + totalValue.toLocaleString('en-US', {minimumFractionDigits:2});
+    if(el('cash-balance')) el('cash-balance').textContent = '$' + cash.toLocaleString('en-US', {minimumFractionDigits:2});
+    if(el('change-24h')) {
+        const prefix = change24h >= 0 ? '+' : '';
+        el('change-24h').textContent = prefix + '$' + change24h + ' (' + prefix + change24hPercent + '%)';
+        el('change-24h').className = 'value ' + (change24h >= 0 ? 'positive' : 'negative');
     }
-
-    // Aktualizace změny za 24h
-    const change24hEl = document.getElementById("change-24h");
-    const change24hPercentEl = document.getElementById("change-24h-percent");
-    
-    if (change24hEl && change24hPercentEl) {
-        const changeColor = change24h >= 0 ? "green" : "red";
-        const changePrefix = change24h >= 0 ? "+" : "";
-        
-        change24hEl.innerText = `${changePrefix}$${change24h}`;
-        change24hEl.style.color = changeColor;
-        
-        change24hPercentEl.innerText = `${changePrefix}${change24hPercent}%`;
-        change24hPercentEl.style.color = changeColor;
-    }
-
-    if (positions.length === 0) {
-        container.innerHTML = "<p>No positions yet.</p>";
-        return;
-    }
-
-    // Původní grid zobrazení
+    if(positions.length === 0) { container.innerHTML = '<p class="text-muted">No positions yet.</p>'; renderAllocationMap([]); return; }
     let html = '<div class="portfolio-grid">';
-
-    for (const p of positions) {
+    for(const p of positions) {
         const profitClass = p.profit >= 0 ? 'positive' : 'negative';
         const profitPrefix = p.profit >= 0 ? '+' : '';
         const firstLetter = p.symbol.charAt(0);
-        
-        html += `
-            <div class="stock-card" data-symbol="${p.symbol}">
-                <div class="stock-icon">${firstLetter}</div>
-                <div class="stock-info">
-                    <div class="stock-header">
-                        <div class="stock-name">${p.symbol}</div>
-                        <div class="stock-value">$${p.value}</div>
-                    </div>
-                    <div class="stock-details">
-                        <div class="stock-amount">${p.amount} akcií</div>
-                        <div class="stock-profit ${profitClass}">
-                            ${profitPrefix}$${p.profit} (${profitPrefix}${p.profit_percent}%)
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
+        html += '<div class="stock-card" data-symbol="'+p.symbol+'">'
+            +'<div class="stock-icon">'+firstLetter+'</div>'
+            +'<div class="stock-info">'
+            +'<div class="stock-header"><div class="stock-name">'+p.symbol+'</div><div class="stock-value">$'+p.value+'</div></div>'
+            +'<div class="stock-details">'
+            +'<div class="stock-amount">'+p.amount+' units @ $'+p.avg_buy_price+'</div>'
+            +'<div class="stock-profit '+profitClass+'">'+profitPrefix+'$'+p.profit+' ('+profitPrefix+p.profit_percent+'%)</div>'
+            +'</div></div></div>';
     }
-
     html += '</div>';
-    
-    // Přidat nadpis pro treemap
-    html += '<h3 style="margin-top: 2rem; margin-bottom: 1rem; color: var(--light-purple);">Alokace aktiv</h3>';
-    
     container.innerHTML = html;
-    
-    // Přidat click handlery pro portfolio karty
     container.querySelectorAll('.stock-card[data-symbol]').forEach(card => {
-        card.addEventListener('click', () => {
-            openStockModal(card.dataset.symbol);
-        });
+        card.addEventListener('click', () => openStockModal(card.dataset.symbol));
     });
-    
-    // Vytvořit treemap pod gridem
-    createTreemap(container, positions, totalValue);
+    renderAllocationMap(positions);
 }
 
-let portfolioChart = null;
+function renderAllocationMap(positions) {
+    const map = document.getElementById('allocation-map');
+    if(!map) return;
+    if(!positions || positions.length === 0) { map.innerHTML = '<p class="text-muted">No positions yet.</p>'; return; }
+    const totalValue = positions.reduce((s, p) => s + p.value, 0);
+    if(totalValue <= 0) { map.innerHTML = ''; return; }
+    // Sort descending by value
+    const sorted = [...positions].sort((a, b) => b.value - a.value);
+    let html = '';
+    for(const p of sorted) {
+        const weight = p.value / totalValue;
+        // 24h $ change for this position: price_change_24h * amount
+        const dollarChange = p.price_change_24h ? round2(p.price_change_24h * p.amount) : 0;
+        // 24h % change for this position
+        const oldPrice = p.price - (p.price_change_24h || 0);
+        const pctChange = oldPrice > 0 ? round2((p.price_change_24h / oldPrice) * 100) : 0;
+        const cls = dollarChange >= 0 ? 'positive' : 'negative';
+        const prefix = dollarChange >= 0 ? '+' : '';
+        // Size: flex-grow proportional to value, min ~80px
+        const basis = Math.max(80, Math.round(weight * 500));
+        const grow = Math.max(1, Math.round(weight * 100));
+        html += '<div class="alloc-block '+cls+'" data-symbol="'+p.symbol+'" style="flex:'+grow+' 1 '+basis+'px; height:'+Math.max(90, Math.round(weight * 300 + 60))+'px;">'
+            +'<div class="alloc-symbol">'+p.symbol+'</div>'
+            +'<div class="alloc-pct">'+prefix+pctChange+'%</div>'
+            +'<div class="alloc-dollar">'+prefix+'$'+dollarChange+'</div>'
+            +'</div>';
+    }
+    map.innerHTML = html;
+    map.querySelectorAll('.alloc-block[data-symbol]').forEach(block => {
+        block.addEventListener('click', () => openStockModal(block.dataset.symbol));
+    });
+}
+function round2(v) { return Math.round(v * 100) / 100; }
 
-async function loadPortfolioChart(force = false) {
-    const canvas = document.getElementById("portfolio-chart");
-    if (!canvas) return;
-    
-    // Nejprve zobrazit uložená data z localStorage (okamžitě)
-    const stored = loadFromStorage(STORAGE_KEYS.portfolioHistory);
-    if (stored && !_cache.portfolioHistory && stored.data.length > 0) {
-        renderPortfolioChart(stored.data);
-    }
-    
+// ===== PORTFOLIO CHART (24h, hourly) =====
+let portfolioChart = null;
+async function loadPortfolioChart(force=false) {
+    const canvas = document.getElementById('portfolio-chart');
+    if(!canvas) return;
     let history;
-    if (!force && _cache.portfolioHistory && (now() - _cache.portfolioHistory.ts) < minutes(1)) {
-        history = _cache.portfolioHistory.data;
-    } else {
-        const res = await fetch("/api/portfolio/history/24h");
-        history = await res.json();
-        _cache.portfolioHistory = { data: history, ts: now() };
-        saveToStorage(STORAGE_KEYS.portfolioHistory, history);
-    }
-    
-    if (history.length === 0) {
+    if(!force && _cache.portfolioHistory && (now()-_cache.portfolioHistory.ts)<minutes(1)) { history = _cache.portfolioHistory.data; }
+    else { const res = await fetch('/api/portfolio/history/24h'); history = await res.json(); _cache.portfolioHistory={data:history, ts:now()}; }
+    if(!history || history.length === 0) {
+        if(portfolioChart) { portfolioChart.destroy(); portfolioChart = null; }
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+        ctx.fillStyle = '#a0aec0'; ctx.textAlign = 'center';
+        ctx.fillText('No data yet – chart will populate over time', canvas.width/2, canvas.height/2);
         return;
     }
-    
-    renderPortfolioChart(history);
-}
-
-function renderPortfolioChart(history) {
-    const canvas = document.getElementById("portfolio-chart");
-    if (!canvas || history.length === 0) return;
-    
-    // Převést timestamp na čas
-    const labels = history.map(item => {
-        const date = new Date(item.timestamp * 1000);
-        return date.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
+    // Labels: show hour like "14:00"
+    const labels = history.map(i => {
+        const d = new Date(i.timestamp * 1000);
+        return d.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
     });
-    
-    const values = history.map(item => item.value);
-    
-    // Určit barvu grafu podle celkové změny
-    const firstValue = values[0];
-    const lastValue = values[values.length - 1];
-    const isPositive = lastValue >= firstValue;
-    
+    const values = history.map(i => i.value);
+    const isPositive = values[values.length - 1] >= values[0];
     const ctx = canvas.getContext('2d');
-    
-    // Zničit předchozí graf, pokud existuje
-    if (portfolioChart) {
-        portfolioChart.destroy();
-    }
-    
+    if(portfolioChart) portfolioChart.destroy();
     portfolioChart = new Chart(ctx, {
         type: 'line',
         data: {
-            labels: labels,
+            labels,
             datasets: [{
-                label: 'Hodnota portfolia',
+                label: 'Portfolio Value',
                 data: values,
-                borderColor: isPositive ? 'rgb(75, 192, 75)' : 'rgb(255, 99, 99)',
-                backgroundColor: isPositive ? 'rgba(75, 192, 75, 0.1)' : 'rgba(255, 99, 99, 0.1)',
+                borderColor: isPositive ? 'rgb(75,192,75)' : 'rgb(255,99,99)',
+                backgroundColor: isPositive ? 'rgba(75,192,75,0.1)' : 'rgba(255,99,99,0.1)',
                 tension: 0.3,
                 fill: true,
-                pointRadius: 3,
-                pointHoverRadius: 5
+                pointRadius: 4,
+                pointHoverRadius: 7,
+                pointBackgroundColor: isPositive ? 'rgb(75,192,75)' : 'rgb(255,99,99)'
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: true,
             plugins: {
-                legend: {
-                    display: false
-                },
+                legend: { display: false },
                 tooltip: {
                     callbacks: {
-                        label: function(context) {
-                            return '$' + context.parsed.y.toFixed(2);
-                        }
+                        title: function(items) { return items[0].label; },
+                        label: function(ctx) { return 'Value: $' + ctx.parsed.y.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}); }
                     }
                 }
             },
             scales: {
                 y: {
                     beginAtZero: false,
-                    ticks: {
-                        callback: function(value) {
-                            return '$' + value;
-                        }
-                    }
+                    ticks: { callback: function(v) { return '$' + v.toLocaleString(); } },
+                    grid: { color: 'rgba(255,255,255,0.06)' }
                 },
                 x: {
-                    ticks: {
-                        maxTicksLimit: 8
-                    }
+                    ticks: { maxTicksLimit: 12, maxRotation: 45, minRotation: 0 },
+                    grid: { color: 'rgba(255,255,255,0.06)' }
                 }
             }
         }
     });
 }
 
-// Ikony pro různé typy aktiv
-const assetIcons = {
-    'AAPL': '🍎',
-    'GOOGL': '🔍',
-    'MSFT': '🪟',
-    'AMZN': '📦',
-    'TSLA': '🚗',
-    'META': '👥',
-    'NVDA': '🎮',
-    'BTC-USD': '₿',
-    'ETH-USD': 'Ξ',
-    'SPY': '📈',
-    'QQQ': '💻',
-    'VOO': '🏛️',
-    'default': '💰'
-};
-
-function getAssetIcon(symbol) {
-    return assetIcons[symbol] || assetIcons['default'];
-}
-
-function createTreemap(container, positions, totalValue) {
-    // Seřadit podle hodnoty sestupně
-    positions.sort((a, b) => b.value - a.value);
-    
-    // Vypočítat relativní velikosti
-    const treemapData = positions.map(p => {
-        const percentage = (p.value / totalValue) * 100;
-        return {
-            ...p,
-            percentage: percentage,
-            // Velikost v pixelech - proporcionální k hodnotě
-            size: Math.max(100, Math.sqrt(percentage) * 50)
-        };
-    });
-    
-    // Vytvořit treemap HTML
-    let html = '<div class="treemap-container">';
-    
-    for (const item of treemapData) {
-        // Určit barvu podle 24h změny
-        const change = item.price_change_24h;
-        const absChange = Math.abs(change);
-        
-        let backgroundColor;
-        if (change > 0) {
-            // Zelená - čím větší změna, tím sytější barva
-            const intensity = Math.min(absChange * 5, 100);
-            const greenValue = Math.floor(150 + (intensity * 1.05)); // 150-255
-            backgroundColor = `rgb(0, ${greenValue}, 0)`;
-        } else if (change < 0) {
-            // Červená - čím větší pokles, tím sytější barva - INTENZIVNÍ ČERVENÁ
-            const intensity = Math.min(absChange * 5, 100);
-            const redValue = Math.floor(180 + (intensity * 0.75)); // 180-255
-            backgroundColor = `rgb(${redValue}, 0, 0)`;
-        } else {
-            // Neutrální šedá
-            backgroundColor = 'rgb(100, 100, 100)';
+// ===== PENDING ORDERS =====
+async function loadPendingOrders() {
+    const container = document.getElementById('pending-orders');
+    if(!container) return;
+    try {
+        const res = await fetch('/api/orders');
+        const orders = await res.json();
+        if(!orders || orders.length === 0) { container.innerHTML = '<p class="text-muted">No pending orders.</p>'; return; }
+        let html = '<table><thead><tr><th>Symbol</th><th>Type</th><th>Action</th><th>Amount</th><th>Target Price</th><th>Created</th><th></th></tr></thead><tbody>';
+        for(const o of orders) {
+            const date = new Date(o.created_at * 1000).toLocaleString('cs-CZ');
+            html += '<tr><td>'+o.symbol+'</td><td>'+o.order_type+'</td><td>'+o.action+'</td><td>'+o.amount+'</td><td>$'+o.target_price+'</td><td>'+date+'</td>'
+                +'<td><button class="btn-sm btn-danger" onclick="cancelOrder('+o.id+')">Cancel</button></td></tr>';
         }
-        
-        // Určit velikost elementu
-        const width = item.size * 2;
-        const height = item.size * 1.5;
-        
-        // Určit třídu pro velikost (pro responzivní font)
-        const sizeClass = item.percentage < 5 ? 'small' : '';
-        
-        const changePrefix = change >= 0 ? '+' : '';
-        const icon = getAssetIcon(item.symbol);
-        
-        html += `
-            <div class="treemap-item ${sizeClass}" 
-                 style="width: ${width}px; height: ${height}px; background-color: ${backgroundColor}; cursor: pointer;"
-                 title="${item.symbol}: $${item.value} (${item.percentage.toFixed(1)}%)"
-                 data-symbol="${item.symbol}">
-                <div class="treemap-icon">${icon}</div>
-                <div class="treemap-symbol">${item.symbol}</div>
-                <div class="treemap-change">${changePrefix}${change.toFixed(2)}%</div>
-                <div class="treemap-value">$${item.value}</div>
-            </div>
-        `;
-    }
-    
-    html += '</div>';
-    container.innerHTML += html;
-    
-    // Přidat click handlery pro treemap položky
-    container.querySelectorAll('.treemap-item[data-symbol]').forEach(item => {
-        item.addEventListener('click', () => {
-            openStockModal(item.dataset.symbol);
-        });
-    });
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    } catch(e) { container.innerHTML = '<p class="text-muted">Error loading orders.</p>'; }
 }
 
-// Category loader with caching
-async function loadStocksByCategory() {
-    const container = document.getElementById("stocks-categories");
-    if (!container) return;
-    if (container.getAttribute('data-loaded') === '1') return; // load once per session
-    
-    // Nejprve zobrazit uložená data z localStorage (okamžitě)
-    const stored = loadFromStorage(STORAGE_KEYS.stocksCategories);
-    if (stored) {
-        renderStocksCategories(stored.data);
-    } else {
-        container.innerHTML = '<p>Načítání...</p>';
+async function cancelOrder(id) {
+    await fetch('/api/orders/'+id, {method:'DELETE'});
+    loadPendingOrders();
+}
+
+async function checkOrders() {
+    try { await fetch('/api/orders/check', {method:'POST'}); } catch(e){}
+}
+
+// ===== TRADE HISTORY =====
+const TRADES_PER_PAGE = 10;
+let _allTrades = [];
+let _tradesPage = 1;
+
+async function loadTradeHistory() {
+    const container = document.getElementById('trade-history');
+    if(!container) return;
+    try {
+        const res = await fetch('/api/trade-history');
+        const trades = await res.json();
+        if(!trades || trades.length === 0) { container.innerHTML = '<p class="text-muted">No trades yet.</p>'; return; }
+        _allTrades = trades;
+        _tradesPage = 1;
+        renderTradeHistoryPage(container);
+    } catch(e) { container.innerHTML = '<p class="text-muted">Error loading trade history.</p>'; }
+}
+
+function renderTradeHistoryPage(container) {
+    if(!container) container = document.getElementById('trade-history');
+    if(!container) return;
+    const totalPages = Math.ceil(_allTrades.length / TRADES_PER_PAGE);
+    if(_tradesPage < 1) _tradesPage = 1;
+    if(_tradesPage > totalPages) _tradesPage = totalPages;
+    const start = (_tradesPage - 1) * TRADES_PER_PAGE;
+    const pageTrades = _allTrades.slice(start, start + TRADES_PER_PAGE);
+
+    let html = '<table><thead><tr><th>Date</th><th>Symbol</th><th>Action</th><th>Amount</th><th>Price</th><th>Fee</th><th>Total</th><th>Profit</th><th>Type</th></tr></thead><tbody>';
+    for(const t of pageTrades) {
+        const date = new Date(t.timestamp * 1000).toLocaleString('cs-CZ');
+        const profitClass = t.action === 'sell' ? (t.profit >= 0 ? 'positive' : 'negative') : '';
+        const profitText = t.action === 'sell' ? ((t.profit >= 0 ? '+' : '') + '$' + t.profit) : '-';
+        const actionClass = t.action === 'buy' ? 'positive' : 'negative';
+        html += '<tr><td>'+date+'</td><td>'+t.symbol+'</td><td class="'+actionClass+'">'+t.action.toUpperCase()+'</td>'
+            +'<td>'+t.amount+'</td><td>$'+t.price+'</td><td>$'+t.fee+'</td><td>$'+t.total+'</td>'
+            +'<td class="'+profitClass+'">'+profitText+'</td><td>'+t.order_type+'</td></tr>';
     }
-    
+    html += '</tbody></table>';
+
+    if(totalPages > 1) {
+        html += '<div class="pagination">';
+        html += '<button class="page-btn'+ (_tradesPage <= 1 ? ' disabled' : '') +'" onclick="changeTradesPage(-1)">&laquo; Prev</button>';
+        for(let i = 1; i <= totalPages; i++) {
+            html += '<button class="page-btn'+ (i === _tradesPage ? ' active' : '') +'" onclick="goToTradesPage('+i+')">'+i+'</button>';
+        }
+        html += '<button class="page-btn'+ (_tradesPage >= totalPages ? ' disabled' : '') +'" onclick="changeTradesPage(1)">Next &raquo;</button>';
+        html += '</div>';
+    }
+    container.innerHTML = html;
+}
+
+function changeTradesPage(delta) { _tradesPage += delta; renderTradeHistoryPage(); }
+function goToTradesPage(page) { _tradesPage = page; renderTradeHistoryPage(); }
+
+// ===== TRADE STATS =====
+async function loadTradeStats() {
+    try {
+        const res = await fetch('/api/trade-stats');
+        const s = await res.json();
+        const el = (id) => document.getElementById(id);
+        if(el('stat-total-trades')) el('stat-total-trades').textContent = s.total_trades;
+        if(el('stat-wins')) el('stat-wins').textContent = s.wins + ' (' + s.win_rate + '%)';
+        if(el('stat-losses')) el('stat-losses').textContent = s.losses;
+        if(el('stat-total-pnl')) {
+            const prefix = s.total_profit >= 0 ? '+' : '';
+            el('stat-total-pnl').textContent = prefix + '$' + s.total_profit;
+            el('stat-total-pnl').className = 'value ' + (s.total_profit >= 0 ? 'positive' : 'negative');
+        }
+        if(el('stat-total-fees')) el('stat-total-fees').textContent = '$' + s.total_fees;
+        if(el('win-rate')) el('win-rate').textContent = s.win_rate + '%';
+    } catch(e){}
+}
+
+// ===== RESET ACCOUNT =====
+async function resetAccount() {
+    if(!confirm('Are you sure you want to reset your account? All data will be lost.')) return;
+    await fetch('/api/reset', {method:'POST'});
+    invalidateCache(['portfolio','portfolioHistory']);
+    localStorage.clear();
+    refreshBalanceBar();
+    loadPortfolio(true);
+    loadPendingOrders();
+    loadTradeHistory();
+    loadTradeStats();
+    loadPies();
+    alert('Account has been reset to $100,000.');
+}
+
+// ===== PIES =====
+const PIE_COLORS = ['#6b46c1','#48bb78','#f56565','#ed8936','#4299e1','#ecc94b','#38b2ac','#e53e3e','#9f7aea','#fc8181','#68d391','#63b3ed'];
+
+function addPieSliceRow() {
+    const builder = document.getElementById('pie-slices-builder');
+    const row = document.createElement('div');
+    row.className = 'pie-slice-row';
+    row.style.cssText = 'display:flex; gap:0.5rem; margin-bottom:0.5rem; align-items:center;';
+    row.innerHTML = '<input type="text" placeholder="Symbol (e.g. AAPL)" class="pie-symbol" style="flex:2;">'
+        +'<input type="number" placeholder="%" class="pie-percent" min="1" max="100" style="flex:1;" oninput="updatePiePctTotal()">'
+        +'<span style="cursor:pointer;color:var(--danger);font-size:1.2rem;" onclick="this.parentElement.remove();updatePiePctTotal();">&times;</span>';
+    builder.appendChild(row);
+}
+
+function updatePiePctTotal() {
+    const pcts = document.querySelectorAll('#pie-slices-builder .pie-percent');
+    let total = 0;
+    pcts.forEach(p => total += parseFloat(p.value) || 0);
+    const el = document.getElementById('pie-total-pct');
+    if(el) { el.textContent = 'Total: ' + total + '%'; el.style.color = Math.abs(total-100)<0.01 ? 'var(--success)' : 'var(--text-muted)'; }
+}
+
+// Attach oninput to the initial row
+document.addEventListener('DOMContentLoaded', () => {
+    const first = document.querySelector('#pie-slices-builder .pie-percent');
+    if(first) first.addEventListener('input', updatePiePctTotal);
+});
+
+async function createPie() {
+    const name = (document.getElementById('pie-name').value || '').trim();
+    const statusEl = document.getElementById('pie-create-status');
+    const rows = document.querySelectorAll('#pie-slices-builder .pie-slice-row');
+    const slices = [];
+    rows.forEach(row => {
+        const sym = (row.querySelector('.pie-symbol').value || '').trim().toUpperCase();
+        const pct = parseFloat(row.querySelector('.pie-percent').value) || 0;
+        if(sym && pct > 0) slices.push({symbol: sym, percent: pct});
+    });
+    if(!name) { statusEl.innerHTML = '<span class="negative">Enter a pie name.</span>'; return; }
+    if(slices.length === 0) { statusEl.innerHTML = '<span class="negative">Add at least one stock.</span>'; return; }
+    const total = slices.reduce((s,x) => s+x.percent, 0);
+    if(Math.abs(total-100) > 0.01) { statusEl.innerHTML = '<span class="negative">Percentages must add up to 100% (currently '+total+'%).</span>'; return; }
+    try {
+        const res = await fetch('/api/pies', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name, slices})});
+        const data = await res.json();
+        if(data.error) { statusEl.innerHTML = '<span class="negative">'+data.error+'</span>'; }
+        else {
+            statusEl.innerHTML = '<span class="positive">'+data.message+'</span>';
+            document.getElementById('pie-name').value = '';
+            document.getElementById('pie-slices-builder').innerHTML = '<div class="pie-slice-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">'
+                +'<input type="text" placeholder="Symbol (e.g. AAPL)" class="pie-symbol" style="flex:2;">'
+                +'<input type="number" placeholder="%" class="pie-percent" min="1" max="100" style="flex:1;" oninput="updatePiePctTotal()"></div>';
+            updatePiePctTotal();
+            loadPies();
+        }
+    } catch(e) { statusEl.innerHTML = '<span class="negative">Error creating pie.</span>'; }
+}
+
+async function loadPies() {
+    const container = document.getElementById('pies-list');
+    if(!container) return;
+    try {
+        const res = await fetch('/api/pies');
+        const pies = await res.json();
+        if(!pies || pies.length === 0) { container.innerHTML = '<p class="text-muted">No pies yet. Create one above.</p>'; return; }
+        let html = '';
+        for(const pie of pies) {
+            const pieJson = JSON.stringify(pie).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            html += '<div class="pie-card" id="pie-card-'+pie.id+'">';
+            html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+            html += '<h3>'+pie.name+'</h3>';
+            html += '<div style="display:flex;align-items:center;gap:0.75rem;">';
+            html += '<span style="font-size:1.1rem;font-weight:700;color:var(--light-purple);">Invested: $'+(pie.invested_value||0)+'</span>';
+            html += '<button class="btn-sm btn-secondary" onclick=\'startEditPie('+pie.id+')\' title="Edit pie" style="font-size:0.85rem;">✏️</button>';
+            html += '<button class="btn-sm btn-secondary" onclick="deletePie('+pie.id+')" title="Delete pie" style="background:rgba(245,101,101,0.2);border-color:rgba(245,101,101,0.4);color:#f56565;">&times;</button>';
+            html += '</div></div>';
+            // Edit form (hidden by default)
+            html += '<div id="pie-edit-form-'+pie.id+'" style="display:none; border:1px solid var(--border-color); border-radius:10px; padding:1rem; margin-bottom:0.75rem;">';
+            html += '<div class="form-group"><label>Pie Name</label><input type="text" id="pie-edit-name-'+pie.id+'" value="'+pie.name+'"></div>';
+            html += '<div id="pie-edit-slices-'+pie.id+'">';
+            pie.slices.forEach(s => {
+                html += '<div class="pie-slice-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem; align-items:center;">'
+                    +'<input type="text" value="'+s.symbol+'" class="pie-symbol" style="flex:2;">'
+                    +'<input type="number" value="'+s.percent+'" class="pie-percent" min="1" max="100" style="flex:1;" oninput="updateEditPiePct('+pie.id+')">'
+                    +'<span style="cursor:pointer;color:var(--danger);font-size:1.2rem;" onclick="this.parentElement.remove();updateEditPiePct('+pie.id+');">&times;</span></div>';
+            });
+            html += '</div>';
+            html += '<div style="display:flex; gap:0.5rem; align-items:center; margin-top:0.5rem;">';
+            html += '<button class="btn-secondary btn-sm" onclick="addEditPieSliceRow('+pie.id+')">+ Add Stock</button>';
+            html += '<span id="pie-edit-pct-'+pie.id+'" style="color:var(--text-muted); margin-left:auto;">Total: '+pie.slices.reduce((s,x)=>s+x.percent,0)+'%</span>';
+            html += '</div>';
+            html += '<div style="display:flex; gap:0.5rem; margin-top:0.75rem;">';
+            html += '<button onclick="saveEditPie('+pie.id+')">Save</button>';
+            html += '<button class="btn-secondary" onclick="cancelEditPie('+pie.id+')">Cancel</button>';
+            html += '</div>';
+            html += '<p id="pie-edit-status-'+pie.id+'" style="margin-top:0.5rem;font-size:0.85rem;"></p>';
+            html += '</div>';
+            // Visual pie chart + legend
+            html += '<div id="pie-display-'+pie.id+'" style="display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap;">';
+            html += '<div style="width:160px;height:160px;flex-shrink:0;"><canvas id="pie-chart-'+pie.id+'"></canvas></div>';
+            // Legend with prices
+            html += '<div class="pie-slices-legend" style="flex:1;flex-direction:column;">';
+            pie.slices.forEach((s, i) => {
+                const color = PIE_COLORS[i % PIE_COLORS.length];
+                html += '<div class="pie-legend-item"><span class="pie-legend-dot" style="background:'+color+';"></span><span>'+s.symbol+' — '+s.percent+'% — <strong>$'+(s.price||0)+'</strong></span></div>';
+            });
+            html += '</div>';
+            html += '</div>';
+            // Buy row
+            html += '<div class="pie-buy-row">';
+            html += '<input type="number" id="pie-buy-amount-'+pie.id+'" placeholder="$ amount" min="1" step="any">';
+            html += '<button class="btn-buy btn-sm" onclick="buyPie('+pie.id+')">Buy Pie</button>';
+            html += '</div>';
+            html += '<p id="pie-status-'+pie.id+'" style="margin-top:0.5rem;font-size:0.85rem;"></p>';
+            html += '</div>';
+        }
+        container.innerHTML = html;
+        // Render Chart.js doughnut for each pie
+        for(const pie of pies) {
+            const canvas = document.getElementById('pie-chart-'+pie.id);
+            if(!canvas) continue;
+            new Chart(canvas.getContext('2d'), {
+                type: 'doughnut',
+                data: {
+                    labels: pie.slices.map(s => s.symbol),
+                    datasets: [{
+                        data: pie.slices.map(s => s.percent),
+                        backgroundColor: pie.slices.map((s, i) => PIE_COLORS[i % PIE_COLORS.length]),
+                        borderColor: 'rgba(26,22,37,0.8)',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { callbacks: { label: c => c.label + ': ' + c.parsed + '%' } }
+                    },
+                    cutout: '55%'
+                }
+            });
+        }
+    } catch(e) { container.innerHTML = '<p class="text-muted">Error loading pies.</p>'; }
+}
+
+function startEditPie(pieId) {
+    document.getElementById('pie-edit-form-'+pieId).style.display = 'block';
+    document.getElementById('pie-display-'+pieId).style.display = 'none';
+}
+function cancelEditPie(pieId) {
+    document.getElementById('pie-edit-form-'+pieId).style.display = 'none';
+    document.getElementById('pie-display-'+pieId).style.display = '';
+}
+function addEditPieSliceRow(pieId) {
+    const builder = document.getElementById('pie-edit-slices-'+pieId);
+    const row = document.createElement('div');
+    row.className = 'pie-slice-row';
+    row.style.cssText = 'display:flex; gap:0.5rem; margin-bottom:0.5rem; align-items:center;';
+    row.innerHTML = '<input type="text" placeholder="Symbol" class="pie-symbol" style="flex:2;">'
+        +'<input type="number" placeholder="%" class="pie-percent" min="1" max="100" style="flex:1;" oninput="updateEditPiePct('+pieId+')">'
+        +'<span style="cursor:pointer;color:var(--danger);font-size:1.2rem;" onclick="this.parentElement.remove();updateEditPiePct('+pieId+');">&times;</span>';
+    builder.appendChild(row);
+}
+function updateEditPiePct(pieId) {
+    const pcts = document.querySelectorAll('#pie-edit-slices-'+pieId+' .pie-percent');
+    let total = 0;
+    pcts.forEach(p => total += parseFloat(p.value) || 0);
+    const el = document.getElementById('pie-edit-pct-'+pieId);
+    if(el) { el.textContent = 'Total: '+total+'%'; el.style.color = Math.abs(total-100)<0.01 ? 'var(--success)' : 'var(--text-muted)'; }
+}
+async function saveEditPie(pieId) {
+    const name = (document.getElementById('pie-edit-name-'+pieId).value || '').trim();
+    const statusEl = document.getElementById('pie-edit-status-'+pieId);
+    const rows = document.querySelectorAll('#pie-edit-slices-'+pieId+' .pie-slice-row');
+    const slices = [];
+    rows.forEach(row => {
+        const sym = (row.querySelector('.pie-symbol').value || '').trim().toUpperCase();
+        const pct = parseFloat(row.querySelector('.pie-percent').value) || 0;
+        if(sym && pct > 0) slices.push({symbol: sym, percent: pct});
+    });
+    if(!name) { statusEl.innerHTML = '<span class="negative">Enter a pie name.</span>'; return; }
+    if(slices.length === 0) { statusEl.innerHTML = '<span class="negative">Add at least one stock.</span>'; return; }
+    const total = slices.reduce((s,x) => s+x.percent, 0);
+    if(Math.abs(total-100) > 0.01) { statusEl.innerHTML = '<span class="negative">Percentages must add up to 100% (currently '+total+'%).</span>'; return; }
+    try {
+        const res = await fetch('/api/pies/'+pieId, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name, slices})});
+        const data = await res.json();
+        if(data.error) { statusEl.innerHTML = '<span class="negative">'+data.error+'</span>'; }
+        else {
+            statusEl.innerHTML = '<span class="positive">'+data.message+'</span>';
+            loadPies();
+        }
+    } catch(e) { statusEl.innerHTML = '<span class="negative">Error updating pie.</span>'; }
+}
+
+async function buyPie(pieId) {
+    const amountEl = document.getElementById('pie-buy-amount-'+pieId);
+    const statusEl = document.getElementById('pie-status-'+pieId);
+    const amount = parseFloat(amountEl.value) || 0;
+    if(amount <= 0) { statusEl.innerHTML = '<span class="negative">Enter a valid dollar amount.</span>'; return; }
+    try {
+        const res = await fetch('/api/pies/'+pieId+'/buy', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({amount})});
+        const data = await res.json();
+        if(data.error) { statusEl.innerHTML = '<span class="negative">'+data.error+'</span>'; }
+        else {
+            let msg = '<span class="positive">Bought pie for $'+amount+':<br>';
+            for(const p of data.purchases) {
+                if(p.error) msg += p.symbol+': '+p.error+'<br>';
+                else msg += p.symbol+': '+p.shares+' shares ($'+p.allocated+')<br>';
+            }
+            msg += '</span>';
+            statusEl.innerHTML = msg;
+            invalidateCache(['portfolio']); refreshBalanceBar();
+            loadPortfolio(true);
+            loadTradeHistory();
+            loadTradeStats();
+            loadPies();
+        }
+    } catch(e) { statusEl.innerHTML = '<span class="negative">Error buying pie.</span>'; }
+}
+
+async function deletePie(pieId) {
+    if(!confirm('Delete this pie?')) return;
+    await fetch('/api/pies/'+pieId, {method:'DELETE'});
+    loadPies();
+}
+
+// ===== CATEGORIES =====
+async function loadStocksByCategory() {
+    const container = document.getElementById('stocks-categories');
+    if(!container) return;
+    if(container.getAttribute('data-loaded')==='1') return;
+    const stored = loadFromStorage(STORAGE_KEYS.stocksCategories);
+    if(stored) renderStocksCategories(stored.data);
+    else container.innerHTML = '<p>Loading...</p>';
     try {
         const res = await fetch('/api/stocks-by-category');
         const data = await res.json();
         saveToStorage(STORAGE_KEYS.stocksCategories, data);
         renderStocksCategories(data);
-        container.setAttribute('data-loaded', '1');
-    } catch (e) {
-        if (!stored) {
-            container.innerHTML = '<p>Chyba při načítání</p>';
-        }
-    }
+        container.setAttribute('data-loaded','1');
+    } catch(e) { if(!stored) container.innerHTML = '<p>Error loading categories.</p>'; }
 }
 
+let currentCategory = null;
 function renderStocksCategories(data) {
-    const container = document.getElementById("stocks-categories");
-    if (!container) return;
-    
-    let html = '';
-    for (const [category, stocks] of Object.entries(data)) {
-        html += `<h3 style="margin-top:2rem; color:var(--light-purple);">${category}</h3>`;
-        html += `<div class="stock-cards-grid">`;
-        for (const stock of stocks) {
-            let changeClass = '';
-            if (typeof stock.change_percent === 'number') {
-                changeClass = stock.change_percent > 0 ? 'positive' : (stock.change_percent < 0 ? 'negative' : '');
-            }
-            html += `
-                <div class="stock-card stock-card-category">
-                    <div class="stock-info">
-                        <div class="stock-header">
-                            <div class="stock-name">${stock.name}</div>
-                            <div class="stock-value">${stock.price !== null ? '$' + stock.price : '-'}</div>
-                        </div>
-                        <div class="stock-details">
-                            <div class="stock-amount">${stock.symbol}</div>
-                            <div class="stock-profit ${changeClass}">
-                                ${stock.change_percent !== null ? (stock.change_percent > 0 ? '+' : '') + stock.change_percent + '%' : '-'}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-        html += `</div>`;
+    const container = document.getElementById('stocks-categories');
+    const tabsContainer = document.getElementById('category-tabs');
+    if(!container || !tabsContainer) return;
+    const categories = Object.keys(data);
+    if(!currentCategory) currentCategory = categories[0];
+    // Render tabs
+    let tabsHtml = '';
+    for(const cat of categories) {
+        tabsHtml += '<button class="tab '+(cat === currentCategory ? 'active' : '')+'" onclick="switchCategory(\''+cat+'\')">'+cat+'</button>';
     }
+    tabsContainer.innerHTML = tabsHtml;
+    // Render stocks for current category
+    const stocks = data[currentCategory] || [];
+    let html = '<div class="stock-cards-grid">';
+    for(const stock of stocks) {
+        let changeClass = '';
+        if(typeof stock.change_percent === 'number') changeClass = stock.change_percent > 0 ? 'positive' : (stock.change_percent < 0 ? 'negative' : '');
+        html += '<div class="stock-card stock-card-category" data-symbol="'+stock.symbol+'">'
+            +'<div class="stock-info"><div class="stock-header"><div class="stock-name">'+stock.name+'</div>'
+            +'<div class="stock-value">'+(stock.price !== null ? '$'+stock.price : '-')+'</div></div>'
+            +'<div class="stock-details"><div class="stock-amount">'+stock.symbol+'</div>'
+            +'<div class="stock-profit '+changeClass+'">'+(stock.change_percent !== null ? (stock.change_percent > 0 ? '+' : '')+stock.change_percent+'%' : '-')+'</div>'
+            +'</div></div></div>';
+    }
+    html += '</div>';
     container.innerHTML = html;
-    
-    // Přidat click handlery pro karty kategorií
     container.querySelectorAll('.stock-card-category').forEach(card => {
-        card.addEventListener('click', () => {
-            const symbol = card.querySelector('.stock-amount').textContent;
-            openStockModal(symbol);
-        });
+        card.addEventListener('click', () => openStockModal(card.dataset.symbol));
     });
+    // Store data for tab switching
+    container._allData = data;
 }
 
-// ==================== STOCK DETAIL MODAL ====================
+function switchCategory(cat) {
+    const container = document.getElementById('stocks-categories');
+    if(!container || !container._allData) return;
+    currentCategory = cat;
+    renderStocksCategories(container._allData);
+}
 
+// ===== BACKTESTING =====
+let btChart = null;
+async function runBacktest() {
+    const symbol = (document.getElementById('bt-symbol').value || '').trim().toUpperCase();
+    const startDate = document.getElementById('bt-date').value;
+    const investment = parseFloat(document.getElementById('bt-investment').value) || 10000;
+    const resultEl = document.getElementById('bt-result');
+    const chartContainer = document.getElementById('bt-chart-container');
+    if(!symbol || !startDate) { resultEl.innerHTML = '<p class="negative">Enter symbol and date.</p>'; return; }
+    resultEl.innerHTML = '<p>Running simulation...</p>';
+    chartContainer.style.display = 'none';
+    try {
+        const res = await fetch('/api/backtest', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({symbol, start_date: startDate, investment})
+        });
+        const data = await res.json();
+        if(data.error) { resultEl.innerHTML = '<p class="negative">'+data.error+'</p>'; return; }
+        const profitClass = data.profit >= 0 ? 'positive' : 'negative';
+        const prefix = data.profit >= 0 ? '+' : '';
+        resultEl.innerHTML = '<div class="backtest-result">'
+            +'<div class="bt-row"><span>Symbol:</span><strong>'+data.symbol+'</strong></div>'
+            +'<div class="bt-row"><span>Period:</span><strong>'+data.start_date+' to '+data.end_date+'</strong></div>'
+            +'<div class="bt-row"><span>Buy Price:</span><strong>$'+data.buy_price+'</strong></div>'
+            +'<div class="bt-row"><span>Current Price:</span><strong>$'+data.current_price+'</strong></div>'
+            +'<div class="bt-row"><span>Shares Bought:</span><strong>'+data.shares+'</strong></div>'
+            +'<div class="bt-row"><span>Investment:</span><strong>$'+data.investment+'</strong></div>'
+            +'<div class="bt-row"><span>Current Value:</span><strong>$'+data.current_value+'</strong></div>'
+            +'<div class="bt-row"><span>Total Fees:</span><strong>$'+data.total_fees+'</strong></div>'
+            +'<div class="bt-row bt-profit"><span>Profit/Loss:</span><strong class="'+profitClass+'">'+prefix+'$'+data.profit+' ('+prefix+data.profit_percent+'%)</strong></div>'
+            +'</div>';
+        // Render backtest chart
+        if(data.chart_data && data.chart_data.length > 0) {
+            chartContainer.style.display = 'block';
+            const labels = data.chart_data.map(i => { const d=new Date(i.timestamp*1000); return d.toLocaleDateString('cs-CZ',{day:'numeric',month:'short'}); });
+            const values = data.chart_data.map(i => i.value);
+            const isPos = values[values.length-1] >= values[0];
+            const ctx = document.getElementById('bt-chart').getContext('2d');
+            if(btChart) btChart.destroy();
+            btChart = new Chart(ctx, {
+                type:'line', data:{labels, datasets:[{label:'Portfolio Value', data:values,
+                    borderColor:isPos?'rgb(75,192,75)':'rgb(255,99,99)',
+                    backgroundColor:isPos?'rgba(75,192,75,0.1)':'rgba(255,99,99,0.1)',
+                    tension:0.3, fill:true, pointRadius:0, pointHoverRadius:4}]},
+                options:{responsive:true, maintainAspectRatio:true, plugins:{legend:{display:false},
+                    tooltip:{callbacks:{label:c=>'$'+c.parsed.y.toFixed(2)}}},
+                    scales:{y:{beginAtZero:false, ticks:{callback:v=>'$'+v}}, x:{ticks:{maxTicksLimit:8}}}}
+            });
+        }
+    } catch(e) { resultEl.innerHTML = '<p class="negative">Error: '+e.message+'</p>'; }
+}
+
+// ===== STOCK DETAIL MODAL =====
 let stockModalChart = null;
+let stockModalLWChart = null;
 let currentModalSymbol = null;
+let currentModalData = null;
+let currentChartType = 'line';
+let currentModalHolding = null;
+let currentSellMode = 'units';
 
 function openStockModal(symbol) {
     currentModalSymbol = symbol.toUpperCase();
+    currentChartType = 'line';
+    currentModalHolding = null;
+    currentSellMode = 'units';
     const modal = document.getElementById('stock-modal');
     modal.style.display = 'flex';
-    
-    // Reset UI
     document.getElementById('modal-symbol').textContent = currentModalSymbol;
-    document.getElementById('modal-current-price').textContent = 'Načítání...';
+    document.getElementById('modal-current-price').textContent = 'Loading...';
     document.getElementById('modal-change').textContent = '';
     document.getElementById('modal-change-percent').textContent = '';
-    
-    // Reset period buttons
-    document.querySelectorAll('.period-btn').forEach(btn => btn.classList.remove('active'));
+    // Reset sell panel
+    const sellPanel = document.getElementById('modal-sell-panel');
+    sellPanel.style.display = 'none';
+    document.getElementById('modal-sell-amount').value = '';
+    document.getElementById('modal-sell-status').innerHTML = '';
+    document.getElementById('modal-sell-preview').textContent = '';
+    // Fetch fresh portfolio to check holdings
+    fetch('/api/portfolio').then(r => r.json()).then(pData => {
+        _cache.portfolio = { data: pData, ts: now() };
+        saveToStorage(STORAGE_KEYS.portfolio, pData);
+        const pos = pData.positions.find(p => p.symbol === currentModalSymbol);
+        if(pos && pos.amount > 0) {
+            currentModalHolding = pos;
+            sellPanel.style.display = 'block';
+            document.getElementById('modal-sell-symbol').textContent = pos.symbol;
+            document.getElementById('modal-sell-holding').textContent = pos.amount;
+            document.getElementById('modal-sell-value').textContent = '$' + pos.value;
+            setSellMode('units');
+        }
+    }).catch(e => console.warn('Could not fetch portfolio for sell panel:', e));
+    // Reset buttons
+    document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
     document.querySelector('.period-btn[data-period="1d"]').classList.add('active');
-    
-    // Load 1D data by default
+    document.querySelectorAll('.chart-type-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector('.chart-type-btn[data-type="line"]').classList.add('active');
     loadStockHistory(currentModalSymbol, '1d');
-    
-    // Setup period button handlers
+    // Period button handlers
     document.querySelectorAll('.period-btn').forEach(btn => {
         btn.onclick = () => {
             document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
@@ -505,153 +736,194 @@ function openStockModal(symbol) {
             loadStockHistory(currentModalSymbol, btn.dataset.period);
         };
     });
+    // Chart type handlers
+    document.querySelectorAll('.chart-type-btn').forEach(btn => {
+        btn.onclick = () => {
+            document.querySelectorAll('.chart-type-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentChartType = btn.dataset.type;
+            if(currentModalData) renderModalChart(currentModalData);
+        };
+    });
 }
 
 function closeStockModal() {
-    const modal = document.getElementById('stock-modal');
-    modal.style.display = 'none';
+    document.getElementById('stock-modal').style.display = 'none';
     currentModalSymbol = null;
-    
-    if (stockModalChart) {
-        stockModalChart.destroy();
-        stockModalChart = null;
+    currentModalData = null;
+    currentModalHolding = null;
+    if(stockModalChart) { stockModalChart.destroy(); stockModalChart = null; }
+    if(stockModalLWChart) { stockModalLWChart.remove(); stockModalLWChart = null; }
+    document.getElementById('candlestick-container').innerHTML = '';
+}
+
+// ===== MODAL SELL FUNCTIONALITY =====
+function setSellMode(mode) {
+    currentSellMode = mode;
+    document.querySelectorAll('.sell-mode-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector('.sell-mode-btn[data-mode="'+mode+'"]').classList.add('active');
+    const label = document.getElementById('modal-sell-label');
+    const input = document.getElementById('modal-sell-amount');
+    input.value = '';
+    document.getElementById('modal-sell-preview').textContent = '';
+    if(mode === 'units') {
+        label.textContent = 'Units to sell:';
+        input.placeholder = '0';
+        input.step = 'any';
+    } else {
+        label.textContent = 'Dollar amount to sell:';
+        input.placeholder = '$0';
+        input.step = '0.01';
     }
 }
 
-// Close modal on click outside
-document.addEventListener('click', (e) => {
-    const modal = document.getElementById('stock-modal');
-    if (e.target === modal) {
-        closeStockModal();
+function sellQuick(pct) {
+    if(!currentModalHolding) return;
+    const input = document.getElementById('modal-sell-amount');
+    if(currentSellMode === 'units') {
+        input.value = parseFloat((currentModalHolding.amount * pct).toFixed(6));
+    } else {
+        const price = (currentModalData && currentModalData.current_price) ? currentModalData.current_price : currentModalHolding.price;
+        input.value = parseFloat((currentModalHolding.amount * price * pct).toFixed(2));
     }
-});
+    onSellAmountInput();
+}
 
-// Close modal on Escape key
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-        closeStockModal();
+function onSellAmountInput() {
+    const preview = document.getElementById('modal-sell-preview');
+    if(!currentModalHolding) { preview.textContent = ''; return; }
+    const raw = parseFloat(document.getElementById('modal-sell-amount').value);
+    if(isNaN(raw) || raw <= 0) { preview.textContent = ''; return; }
+    const price = (currentModalData && currentModalData.current_price) ? currentModalData.current_price : currentModalHolding.price;
+    if(currentSellMode === 'units') {
+        const val = (raw * price).toFixed(2);
+        const fee = (raw * price * 0.001).toFixed(2);
+        preview.textContent = 'Sell ' + raw + ' units ≈ $' + val + ' (fee: $' + fee + ')';
+    } else {
+        const units = (raw / price).toFixed(6);
+        const fee = (raw * 0.001).toFixed(2);
+        preview.textContent = 'Sell ≈ ' + units + ' units for $' + raw + ' (fee: $' + fee + ')';
     }
-});
+}
+
+async function executeModalSell() {
+    if(!currentModalHolding || !currentModalData) return;
+    const statusEl = document.getElementById('modal-sell-status');
+    const raw = parseFloat(document.getElementById('modal-sell-amount').value);
+    if(isNaN(raw) || raw <= 0) { statusEl.innerHTML = '<span class="negative">Enter a valid amount.</span>'; return; }
+
+    const price = currentModalData.current_price || currentModalHolding.price;
+    let units;
+    if(currentSellMode === 'units') {
+        units = raw;
+    } else {
+        units = raw / price;
+    }
+    if(units > currentModalHolding.amount) units = currentModalHolding.amount;
+    if(units <= 0) { statusEl.innerHTML = '<span class="negative">Amount too small.</span>'; return; }
+
+    try {
+        const res = await fetch('/api/trade', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({symbol: currentModalSymbol, action: 'sell', amount: units, order_type: 'market', target_price: 0})
+        });
+        const data = await res.json();
+        if(data.error) { statusEl.innerHTML = '<span class="negative">'+data.error+'</span>'; }
+        else {
+            statusEl.innerHTML = '<span class="positive">'+data.message+'</span>';
+            currentModalHolding.amount = Math.max(0, currentModalHolding.amount - units);
+            currentModalHolding.value = parseFloat(Math.max(0, currentModalHolding.amount * price).toFixed(2));
+            document.getElementById('modal-sell-holding').textContent = currentModalHolding.amount.toFixed(4);
+            document.getElementById('modal-sell-value').textContent = '$' + currentModalHolding.value;
+            document.getElementById('modal-sell-amount').value = '';
+            document.getElementById('modal-sell-preview').textContent = '';
+            if(currentModalHolding.amount <= 0.0001) {
+                document.getElementById('modal-sell-panel').style.display = 'none';
+            }
+            invalidateCache(['portfolio']);
+            refreshBalanceBar();
+            await loadPortfolio(true);
+            loadPies();
+        }
+    } catch(e) { statusEl.innerHTML = '<span class="negative">Error: '+e.message+'</span>'; }
+}
+
+document.addEventListener('click', e => { if(e.target === document.getElementById('stock-modal')) closeStockModal(); });
+document.addEventListener('keydown', e => { if(e.key === 'Escape') closeStockModal(); });
 
 async function loadStockHistory(symbol, period) {
     const loading = document.getElementById('modal-loading');
     const chartContainer = document.querySelector('.modal-chart-container');
-    
     loading.style.display = 'block';
     chartContainer.style.opacity = '0.5';
-    
     try {
-        const res = await fetch(`/api/stock/${symbol}/history/${period}`);
+        const res = await fetch('/api/stock/'+symbol+'/history/'+period);
         const data = await res.json();
-        
-        // Update price and change
-        document.getElementById('modal-current-price').textContent = `$${data.current_price || 0}`;
-        
+        currentModalData = data;
+        document.getElementById('modal-current-price').textContent = '$'+(data.current_price || 0);
         const changeEl = document.getElementById('modal-change');
         const changePercentEl = document.getElementById('modal-change-percent');
-        const modalChangeDiv = document.querySelector('.modal-change');
-        
+        const changeDiv = document.querySelector('.modal-change');
         const prefix = data.change >= 0 ? '+' : '';
-        changeEl.textContent = `${prefix}$${data.change}`;
-        changePercentEl.textContent = `(${prefix}${data.change_percent}%)`;
-        
-        modalChangeDiv.classList.remove('positive', 'negative');
-        modalChangeDiv.classList.add(data.change >= 0 ? 'positive' : 'negative');
-        
-        // Render chart
-        renderStockModalChart(data);
-        
-    } catch (e) {
-        console.error('Error loading stock history:', e);
-        document.getElementById('modal-current-price').textContent = 'Chyba';
-    } finally {
-        loading.style.display = 'none';
-        chartContainer.style.opacity = '1';
-    }
+        changeEl.textContent = prefix+'$'+data.change;
+        changePercentEl.textContent = '('+prefix+data.change_percent+'%)';
+        changeDiv.classList.remove('positive','negative');
+        changeDiv.classList.add(data.change >= 0 ? 'positive' : 'negative');
+        renderModalChart(data);
+    } catch(e) { document.getElementById('modal-current-price').textContent = 'Error'; }
+    finally { loading.style.display = 'none'; chartContainer.style.opacity = '1'; }
 }
 
-function renderStockModalChart(data) {
+function renderModalChart(data) {
     const canvas = document.getElementById('stock-modal-chart');
-    if (!canvas) return;
-    
-    const ctx = canvas.getContext('2d');
-    
-    if (stockModalChart) {
-        stockModalChart.destroy();
+    const candleContainer = document.getElementById('candlestick-container');
+    // Clean up previous charts
+    if(stockModalChart) { stockModalChart.destroy(); stockModalChart = null; }
+    if(stockModalLWChart) { stockModalLWChart.remove(); stockModalLWChart = null; }
+    candleContainer.innerHTML = '';
+    if(currentChartType === 'candle' && data.ohlc && data.ohlc.length > 0) {
+        // Candlestick with lightweight-charts
+        canvas.style.display = 'none';
+        candleContainer.style.display = 'block';
+        const chart = LightweightCharts.createChart(candleContainer, {
+            width: candleContainer.clientWidth || 550,
+            height: 250,
+            layout: { background: {type:'solid', color:'transparent'}, textColor:'#a0aec0' },
+            grid: { vertLines:{color:'rgba(255,255,255,0.05)'}, horzLines:{color:'rgba(255,255,255,0.05)'} },
+            crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+            timeScale: { timeVisible: true, secondsVisible: false }
+        });
+        const candleSeries = chart.addCandlestickSeries({
+            upColor:'#48bb78', downColor:'#f56565', borderUpColor:'#48bb78', borderDownColor:'#f56565',
+            wickUpColor:'#48bb78', wickDownColor:'#f56565'
+        });
+        candleSeries.setData(data.ohlc.map(d => ({time: d.time, open: d.open, high: d.high, low: d.low, close: d.close})));
+        chart.timeScale().fitContent();
+        stockModalLWChart = chart;
+    } else {
+        // Line chart with Chart.js
+        canvas.style.display = 'block';
+        candleContainer.style.display = 'none';
+        if(!data.data || data.data.length === 0) return;
+        const labels = data.data.map(i => {
+            const d = new Date(i.timestamp*1000);
+            if(data.period==='1d') return d.toLocaleTimeString('cs-CZ',{hour:'2-digit',minute:'2-digit'});
+            if(data.period==='1w') return d.toLocaleDateString('cs-CZ',{weekday:'short',hour:'2-digit',minute:'2-digit'});
+            return d.toLocaleDateString('cs-CZ',{day:'numeric',month:'short'});
+        });
+        const values = data.data.map(i => i.price);
+        const isPos = data.change >= 0;
+        const ctx = canvas.getContext('2d');
+        stockModalChart = new Chart(ctx, {
+            type:'line', data:{labels, datasets:[{label:data.symbol, data:values,
+                borderColor:isPos?'rgb(75,192,75)':'rgb(255,99,99)',
+                backgroundColor:isPos?'rgba(75,192,75,0.1)':'rgba(255,99,99,0.1)',
+                tension:0.3, fill:true, pointRadius:data.data.length>50?0:2, pointHoverRadius:4}]},
+            options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false},
+                tooltip:{callbacks:{label:c=>'$'+c.parsed.y.toFixed(2)}}},
+                scales:{y:{beginAtZero:false, ticks:{callback:v=>'$'+v}, grid:{color:'rgba(255,255,255,0.1)'}},
+                    x:{ticks:{maxTicksLimit:6}, grid:{color:'rgba(255,255,255,0.1)'}}}}
+        });
     }
-    
-    if (!data.data || data.data.length === 0) {
-        return;
-    }
-    
-    // Format labels based on period
-    const labels = data.data.map(item => {
-        const date = new Date(item.timestamp * 1000);
-        if (data.period === '1d') {
-            return date.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
-        } else if (data.period === '1w') {
-            return date.toLocaleDateString('cs-CZ', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
-        } else if (data.period === '1m') {
-            return date.toLocaleDateString('cs-CZ', { day: 'numeric', month: 'short' });
-        } else {
-            return date.toLocaleDateString('cs-CZ', { day: 'numeric', month: 'short' });
-        }
-    });
-    
-    const values = data.data.map(item => item.price);
-    const isPositive = data.change >= 0;
-    
-    stockModalChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: data.symbol,
-                data: values,
-                borderColor: isPositive ? 'rgb(75, 192, 75)' : 'rgb(255, 99, 99)',
-                backgroundColor: isPositive ? 'rgba(75, 192, 75, 0.1)' : 'rgba(255, 99, 99, 0.1)',
-                tension: 0.3,
-                fill: true,
-                pointRadius: data.data.length > 50 ? 0 : 2,
-                pointHoverRadius: 4
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    display: false
-                },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            return '$' + context.parsed.y.toFixed(2);
-                        }
-                    }
-                }
-            },
-            scales: {
-                y: {
-                    beginAtZero: false,
-                    ticks: {
-                        callback: function(value) {
-                            return '$' + value;
-                        }
-                    },
-                    grid: {
-                        color: 'rgba(255, 255, 255, 0.1)'
-                    }
-                },
-                x: {
-                    ticks: {
-                        maxTicksLimit: 6
-                    },
-                    grid: {
-                        color: 'rgba(255, 255, 255, 0.1)'
-                    }
-                }
-            }
-        }
-    });
 }
