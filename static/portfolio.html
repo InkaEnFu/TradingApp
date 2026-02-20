@@ -28,6 +28,13 @@
                     (<span id="change-24h-percent" style="font-weight: bold;">-</span>)
                 </p>
                 <div style="margin-top: 20px;">
+                    <div class="chart-period-buttons" style="display:flex; gap:0.4rem; margin-bottom:0.5rem;">
+                        <button class="period-btn" onclick="switchPortfolioPeriod('24h',this)">24H</button>
+                        <button class="period-btn" onclick="switchPortfolioPeriod('1w',this)">1W</button>
+                        <button class="period-btn" onclick="switchPortfolioPeriod('1m',this)">1M</button>
+                        <button class="period-btn" onclick="switchPortfolioPeriod('1y',this)">1Y</button>
+                        <button class="period-btn" onclick="switchPortfolioPeriod('max',this)">MAX</button>
+                    </div>
                     <canvas id="portfolio-chart" style="max-height: 300px;"></canvas>
                 </div>
             </div>

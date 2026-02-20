@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from .prices import get_price, get_price_change_24h, get_stock_history, run_backtest
 from .portfolio import (
-    buy_stock, sell_stock, get_portfolio, get_portfolio_history_24h,
+    buy_stock, sell_stock, get_portfolio, get_portfolio_history_24h, get_portfolio_history,
     get_account_info, create_order, cancel_order, get_pending_orders,
     check_pending_orders, get_trade_history, get_trade_stats, reset_account,
     snapshot_portfolio_value,
@@ -143,6 +143,13 @@ async def api_portfolio():
 @app.get("/api/portfolio/history/24h")
 async def api_portfolio_history():
     return get_portfolio_history_24h()
+
+
+@app.get("/api/portfolio/history/{period}")
+async def api_portfolio_history_period(period: str):
+    if period not in ('24h', '1w', '1m', '1y', 'max'):
+        return {"error": "Invalid period"}
+    return get_portfolio_history(period)
 
 
 @app.get("/api/account")

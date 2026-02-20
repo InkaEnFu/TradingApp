@@ -283,7 +283,7 @@ def get_trade_stats() -> dict:
     rows = cursor.fetchall()
 
     if not rows:
-        return {"total_trades": 0, "sells": 0, "wins": 0, "losses": 0, "win_rate": 0, "total_profit": 0, "total_fees": 0}
+        return {"total_trades": 0, "sells": 0, "wins": 0, "losses": 0, "win_rate": 0, "loss_rate": 0, "total_profit": 0, "total_fees": 0}
 
     wins = sum(1 for r in rows if r[0] > 0)
     losses = sum(1 for r in rows if r[0] <= 0)
@@ -296,6 +296,7 @@ def get_trade_stats() -> dict:
 
     sell_count = len(rows)
     win_rate = round((wins / sell_count) * 100, 1) if sell_count > 0 else 0
+    loss_rate = round((losses / sell_count) * 100, 1) if sell_count > 0 else 0
 
     return {
         "total_trades": total_trades,
@@ -303,6 +304,7 @@ def get_trade_stats() -> dict:
         "wins": wins,
         "losses": losses,
         "win_rate": win_rate,
+        "loss_rate": loss_rate,
         "total_profit": round(total_profit, 2),
         "total_fees": round(total_fees, 2),
     }
@@ -369,9 +371,9 @@ def get_portfolio():
         change_24h = round(total_value - old_row[0], 2)
         change_24h_percent = round((change_24h / old_row[0]) * 100, 2)
 
-    # Cleanup old records (>30 days)
-    time_30d_ago = current_time - (30 * 86400)
-    cursor.execute("DELETE FROM portfolio_history WHERE timestamp < ?", (time_30d_ago,))
+    # Cleanup old records (>1 year)
+    time_1y_ago = current_time - (365 * 86400)
+    cursor.execute("DELETE FROM portfolio_history WHERE timestamp < ?", (time_1y_ago,))
     conn.commit()
 
     return {
@@ -408,40 +410,67 @@ def snapshot_portfolio_value():
 
 
 def get_portfolio_history_24h():
-    """Return portfolio value aggregated into 24 hourly buckets.
+    """Return portfolio value aggregated into 24 hourly buckets."""
+    return get_portfolio_history('24h')
 
-    Each bucket represents one hour.  If there is no data in a bucket the
-    last known value is carried forward so the chart always has 24 points.
+
+def get_portfolio_history(period: str = '24h'):
+    """Return portfolio value history for the given period.
+
+    Supported periods: '1w' (week), '1m' (month), '1y' (year), 'max', '24h'.
+    Data is aggregated into appropriate time buckets.
     """
     current_time = int(time.time())
-    time_24h_ago = current_time - 86400
 
-    cursor.execute(
-        "SELECT timestamp, total_value FROM portfolio_history WHERE timestamp >= ? ORDER BY timestamp ASC",
-        (time_24h_ago,),
-    )
+    period_config = {
+        '24h': {'seconds': 86400,       'bucket': 3600,      'max_points': 24},
+        '1w':  {'seconds': 7 * 86400,   'bucket': 6 * 3600,  'max_points': 28},
+        '1m':  {'seconds': 30 * 86400,  'bucket': 86400,     'max_points': 30},
+        '1y':  {'seconds': 365 * 86400, 'bucket': 7 * 86400, 'max_points': 52},
+        'max': {'seconds': None,        'bucket': None,      'max_points': 100},
+    }
+
+    config = period_config.get(period, period_config['24h'])
+
+    if config['seconds'] is not None:
+        time_start = current_time - config['seconds']
+        cursor.execute(
+            "SELECT timestamp, total_value FROM portfolio_history WHERE timestamp >= ? ORDER BY timestamp ASC",
+            (time_start,),
+        )
+    else:
+        cursor.execute(
+            "SELECT timestamp, total_value FROM portfolio_history ORDER BY timestamp ASC"
+        )
     rows = cursor.fetchall()
 
     if not rows:
         return []
 
-    # Build 24 hourly buckets (hour_start -> best value)
-    # Each bucket covers [hour_start, hour_start + 3600)
-    bucket_start = time_24h_ago - (time_24h_ago % 3600) + 3600  # next full hour after 24h ago
-    buckets = {}  # hour_ts -> last value in that bucket
-    for ts, val in rows:
-        hour_ts = ts - (ts % 3600)  # round down to hour
-        buckets[hour_ts] = round(val, 2)  # last write wins (latest in hour)
+    # For 'max' period, auto-calculate bucket size
+    bucket_size = config['bucket']
+    if bucket_size is None:
+        total_span = rows[-1][0] - rows[0][0]
+        if total_span <= 0:
+            return [{"timestamp": rows[0][0], "value": round(rows[0][1], 2)}]
+        bucket_size = max(3600, total_span // config['max_points'])
 
-    # Generate 24 ordered hourly slots
+    time_start_val = rows[0][0] if config['seconds'] is None else current_time - config['seconds']
+    bucket_start = time_start_val - (time_start_val % bucket_size) + bucket_size
+
+    buckets = {}
+    for ts, val in rows:
+        b_ts = ts - (ts % bucket_size)
+        buckets[b_ts] = round(val, 2)
+
     result = []
-    last_value = rows[0][1]  # first known value as fallback
+    last_value = rows[0][1]
     hour = bucket_start
     while hour <= current_time:
         if hour in buckets:
             last_value = buckets[hour]
         result.append({"timestamp": hour, "value": round(last_value, 2)})
-        hour += 3600
+        hour += bucket_size
 
     return result
 

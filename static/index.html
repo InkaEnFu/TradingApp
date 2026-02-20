@@ -37,7 +37,10 @@
                     <div class="trading-left">
                         <div class="form-group">
                             <label for="symbol">Symbol</label>
-                            <input id="symbol" type="text" placeholder="AAPL, BTC-USD, GC=F...">
+                            <div class="autocomplete-wrapper">
+                                <input id="symbol" type="text" placeholder="AAPL, BTC-USD, GC=F..." autocomplete="off">
+                                <div class="autocomplete-dropdown" id="symbol-dropdown"></div>
+                            </div>
                         </div>
                         <button class="btn-secondary" onclick="loadPrice()">Get Price</button>
                         <p id="price"></p>
@@ -83,7 +86,10 @@
                 <div class="backtest-grid">
                     <div class="form-group">
                         <label for="bt-symbol">Symbol</label>
-                        <input id="bt-symbol" type="text" placeholder="AAPL">
+                        <div class="autocomplete-wrapper">
+                            <input id="bt-symbol" type="text" placeholder="AAPL" autocomplete="off">
+                            <div class="autocomplete-dropdown" id="bt-symbol-dropdown"></div>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label for="bt-date">Start Date</label>
@@ -126,7 +132,16 @@
 
             <!-- Portfolio value chart -->
             <div class="card">
-                <h2>Portfolio Value (24h)</h2>
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.5rem;">
+                    <h2 style="margin:0;">Portfolio Value</h2>
+                    <div class="chart-period-buttons" style="display:flex; gap:0.4rem;">
+                        <button class="period-btn" onclick="switchPortfolioPeriod('24h',this)">24H</button>
+                        <button class="period-btn" onclick="switchPortfolioPeriod('1w',this)">1W</button>
+                        <button class="period-btn" onclick="switchPortfolioPeriod('1m',this)">1M</button>
+                        <button class="period-btn" onclick="switchPortfolioPeriod('1y',this)">1Y</button>
+                        <button class="period-btn" onclick="switchPortfolioPeriod('max',this)">MAX</button>
+                    </div>
+                </div>
                 <canvas id="portfolio-chart" style="max-height:300px;"></canvas>
             </div>
 
@@ -162,7 +177,10 @@
                     </div>
                     <div id="pie-slices-builder">
                         <div class="pie-slice-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
-                            <input type="text" placeholder="Symbol (e.g. AAPL)" class="pie-symbol" style="flex:2;">
+                            <div class="autocomplete-wrapper" style="flex:2;">
+                                <input type="text" placeholder="Symbol (e.g. AAPL)" class="pie-symbol" id="pie-sym-init" autocomplete="off">
+                                <div class="autocomplete-dropdown" id="pie-sym-init-dd"></div>
+                            </div>
                             <input type="number" placeholder="%" class="pie-percent" min="1" max="100" style="flex:1;">
                         </div>
                     </div>
@@ -294,6 +312,10 @@
             showView(location.hash || '#market');
             refreshBalanceBar();
             setInterval(checkOrders, 30000);
+            // Setup autocomplete on symbol inputs
+            setupAutocomplete('symbol', 'symbol-dropdown', function(sym) { loadPrice(); });
+            setupAutocomplete('bt-symbol', 'bt-symbol-dropdown');
+            setupAutocomplete('pie-sym-init', 'pie-sym-init-dd');
         });
     </script>
 </body>

@@ -7,6 +7,107 @@ function now() { return Date.now(); }
 function minutes(n) { return n*60*1000; }
 function invalidateCache(keys) { if(!keys) return; for(const k of keys){ if(k==='price') _cache.price.clear(); if(k==='portfolio') _cache.portfolio=null; if(k==='portfolioHistory') _cache.portfolioHistory=null; }}
 
+// ===== AUTOCOMPLETE =====
+let _acCache = null;
+let _acDebounce = null;
+
+async function getAllSymbols() {
+    if(!_acCache) {
+        const res = await fetch('/api/symbols/search?q=');
+        _acCache = await res.json();
+    }
+    return _acCache;
+}
+
+function filterSymbols(all, query) {
+    if(!query) return all.slice(0, 10);
+    const qu = query.toUpperCase();
+    return all.filter(s => s.symbol.toUpperCase().startsWith(qu)).slice(0, 12);
+}
+
+function setupAutocomplete(inputId, dropdownId, onSelect) {
+    const input = document.getElementById(inputId);
+    const dropdown = document.getElementById(dropdownId);
+    if(!input || !dropdown) return;
+
+    let activeIdx = -1;
+    let justSelected = false;
+
+    async function showSuggestions() {
+        if(justSelected) { justSelected = false; return; }
+        const all = await getAllSymbols();
+        const val = input.value.trim();
+        const results = filterSymbols(all, val);
+        activeIdx = -1;
+        if(!results.length) { dropdown.classList.remove('show'); return; }
+        dropdown.innerHTML = results.map((r, i) =>
+            '<div class="autocomplete-item" data-symbol="' + r.symbol + '" data-idx="' + i + '">' +
+            '<span class="ac-symbol">' + r.symbol + '</span></div>'
+        ).join('');
+        dropdown.classList.add('show');
+        dropdown.querySelectorAll('.autocomplete-item').forEach(item => {
+            item.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                justSelected = true;
+                input.value = this.dataset.symbol;
+                dropdown.classList.remove('show');
+                dropdown.innerHTML = '';
+                activeIdx = -1;
+                if(onSelect) onSelect(this.dataset.symbol);
+            });
+        });
+    }
+
+    function highlightItem() {
+        const items = dropdown.querySelectorAll('.autocomplete-item');
+        items.forEach(it => it.classList.remove('active'));
+        if(activeIdx >= 0 && activeIdx < items.length) {
+            items[activeIdx].classList.add('active');
+            items[activeIdx].scrollIntoView({block:'nearest'});
+        }
+    }
+
+    input.addEventListener('input', function() {
+        clearTimeout(_acDebounce);
+        _acDebounce = setTimeout(showSuggestions, 100);
+    });
+
+    input.addEventListener('focus', function() {
+        clearTimeout(_acDebounce);
+        _acDebounce = setTimeout(showSuggestions, 100);
+    });
+
+    input.addEventListener('blur', function() {
+        // Small delay to allow mousedown on item
+        setTimeout(() => { dropdown.classList.remove('show'); activeIdx = -1; }, 150);
+    });
+
+    input.addEventListener('keydown', function(e) {
+        const items = dropdown.querySelectorAll('.autocomplete-item');
+        if(!dropdown.classList.contains('show') || !items.length) return;
+        if(e.key === 'ArrowDown') {
+            e.preventDefault();
+            activeIdx = Math.min(activeIdx + 1, items.length - 1);
+            highlightItem();
+        } else if(e.key === 'ArrowUp') {
+            e.preventDefault();
+            activeIdx = Math.max(activeIdx - 1, 0);
+            highlightItem();
+        } else if(e.key === 'Enter' && activeIdx >= 0) {
+            e.preventDefault();
+            justSelected = true;
+            input.value = items[activeIdx].dataset.symbol;
+            dropdown.classList.remove('show');
+            dropdown.innerHTML = '';
+            activeIdx = -1;
+            if(onSelect) onSelect(input.value);
+        } else if(e.key === 'Escape') {
+            dropdown.classList.remove('show');
+            activeIdx = -1;
+        }
+    });
+}
+
 // ===== BALANCE BAR =====
 async function refreshBalanceBar() {
     try {
@@ -159,14 +260,43 @@ function renderAllocationMap(positions) {
 }
 function round2(v) { return Math.round(v * 100) / 100; }
 
-// ===== PORTFOLIO CHART (24h, hourly) =====
+// ===== PORTFOLIO CHART =====
 let portfolioChart = null;
+let currentPortfolioPeriod = '24h';
+
+function getChartLabelFormat(period) {
+    return function(timestamp) {
+        const d = new Date(timestamp * 1000);
+        if(period === '24h') return d.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
+        if(period === '1w') return d.toLocaleDateString('cs-CZ', { weekday: 'short', day: 'numeric' });
+        if(period === '1m') return d.toLocaleDateString('cs-CZ', { day: 'numeric', month: 'short' });
+        if(period === '1y') return d.toLocaleDateString('cs-CZ', { month: 'short', year: '2-digit' });
+        return d.toLocaleDateString('cs-CZ', { day: 'numeric', month: 'short', year: '2-digit' });
+    };
+}
+
+function switchPortfolioPeriod(period, btnEl) {
+    currentPortfolioPeriod = period;
+    // Update active button
+    document.querySelectorAll('.chart-period-buttons .period-btn').forEach(b => b.classList.remove('active'));
+    if(btnEl) btnEl.classList.add('active');
+    // Clear cache and reload
+    _cache.portfolioHistory = null;
+    loadPortfolioChart(true);
+}
+
 async function loadPortfolioChart(force=false) {
     const canvas = document.getElementById('portfolio-chart');
     if(!canvas) return;
     let history;
-    if(!force && _cache.portfolioHistory && (now()-_cache.portfolioHistory.ts)<minutes(1)) { history = _cache.portfolioHistory.data; }
-    else { const res = await fetch('/api/portfolio/history/24h'); history = await res.json(); _cache.portfolioHistory={data:history, ts:now()}; }
+    const cacheKey = 'ph_' + currentPortfolioPeriod;
+    if(!force && _cache.portfolioHistory && _cache.portfolioHistory.period === currentPortfolioPeriod && (now()-_cache.portfolioHistory.ts)<minutes(1)) {
+        history = _cache.portfolioHistory.data;
+    } else {
+        const res = await fetch('/api/portfolio/history/' + currentPortfolioPeriod);
+        history = await res.json();
+        _cache.portfolioHistory = { data: history, ts: now(), period: currentPortfolioPeriod };
+    }
     if(!history || history.length === 0) {
         if(portfolioChart) { portfolioChart.destroy(); portfolioChart = null; }
         const ctx = canvas.getContext('2d');
@@ -175,13 +305,12 @@ async function loadPortfolioChart(force=false) {
         ctx.fillText('No data yet – chart will populate over time', canvas.width/2, canvas.height/2);
         return;
     }
-    // Labels: show hour like "14:00"
-    const labels = history.map(i => {
-        const d = new Date(i.timestamp * 1000);
-        return d.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
-    });
+    const labelFn = getChartLabelFormat(currentPortfolioPeriod);
+    const labels = history.map(i => labelFn(i.timestamp));
     const values = history.map(i => i.value);
     const isPositive = values[values.length - 1] >= values[0];
+    const maxTicks = currentPortfolioPeriod === '24h' ? 12 : currentPortfolioPeriod === '1w' ? 7 : 10;
+    const pointRadius = history.length > 50 ? 0 : history.length > 30 ? 2 : 4;
     const ctx = canvas.getContext('2d');
     if(portfolioChart) portfolioChart.destroy();
     portfolioChart = new Chart(ctx, {
@@ -195,7 +324,7 @@ async function loadPortfolioChart(force=false) {
                 backgroundColor: isPositive ? 'rgba(75,192,75,0.1)' : 'rgba(255,99,99,0.1)',
                 tension: 0.3,
                 fill: true,
-                pointRadius: 4,
+                pointRadius: pointRadius,
                 pointHoverRadius: 7,
                 pointBackgroundColor: isPositive ? 'rgb(75,192,75)' : 'rgb(255,99,99)'
             }]
@@ -219,12 +348,18 @@ async function loadPortfolioChart(force=false) {
                     grid: { color: 'rgba(255,255,255,0.06)' }
                 },
                 x: {
-                    ticks: { maxTicksLimit: 12, maxRotation: 45, minRotation: 0 },
+                    ticks: { maxTicksLimit: maxTicks, maxRotation: 45, minRotation: 0 },
                     grid: { color: 'rgba(255,255,255,0.06)' }
                 }
             }
         }
     });
+
+    // Highlight 24H button by default on first load
+    if(!document.querySelector('.chart-period-buttons .period-btn.active')) {
+        const btns = document.querySelectorAll('.chart-period-buttons .period-btn');
+        btns.forEach(b => { if(b.textContent === '24H') b.classList.add('active'); });
+    }
 }
 
 // ===== PENDING ORDERS =====
@@ -317,7 +452,7 @@ async function loadTradeStats() {
         const el = (id) => document.getElementById(id);
         if(el('stat-total-trades')) el('stat-total-trades').textContent = s.total_trades;
         if(el('stat-wins')) el('stat-wins').textContent = s.wins + ' (' + s.win_rate + '%)';
-        if(el('stat-losses')) el('stat-losses').textContent = s.losses;
+        if(el('stat-losses')) el('stat-losses').textContent = s.losses + ' (' + (s.loss_rate || 0) + '%)';
         if(el('stat-total-pnl')) {
             const prefix = s.total_profit >= 0 ? '+' : '';
             el('stat-total-pnl').textContent = prefix + '$' + s.total_profit;
@@ -351,10 +486,14 @@ function addPieSliceRow() {
     const row = document.createElement('div');
     row.className = 'pie-slice-row';
     row.style.cssText = 'display:flex; gap:0.5rem; margin-bottom:0.5rem; align-items:center;';
-    row.innerHTML = '<input type="text" placeholder="Symbol (e.g. AAPL)" class="pie-symbol" style="flex:2;">'
+    const uid = 'pie-sym-' + Date.now();
+    const ddid = uid + '-dd';
+    row.innerHTML = '<div class="autocomplete-wrapper" style="flex:2;"><input type="text" placeholder="Symbol (e.g. AAPL)" class="pie-symbol" id="'+uid+'" autocomplete="off">'
+        +'<div class="autocomplete-dropdown" id="'+ddid+'"></div></div>'
         +'<input type="number" placeholder="%" class="pie-percent" min="1" max="100" style="flex:1;" oninput="updatePiePctTotal()">'
         +'<span style="cursor:pointer;color:var(--danger);font-size:1.2rem;" onclick="this.parentElement.remove();updatePiePctTotal();">&times;</span>';
     builder.appendChild(row);
+    setupAutocomplete(uid, ddid);
 }
 
 function updatePiePctTotal() {

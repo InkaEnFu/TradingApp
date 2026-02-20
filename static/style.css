@@ -31,6 +31,16 @@ nav a:hover, nav a.active { background:var(--accent-purple); border-color:var(--
 .card h2 { color:var(--light-purple); margin-bottom:1.5rem; font-size:1.75rem; border-bottom:2px solid var(--border-color); padding-bottom:0.5rem; }
 
 .form-group { margin-bottom:1.5rem; }
+
+/* Autocomplete */
+.autocomplete-wrapper { position:relative; }
+.autocomplete-dropdown { display:none; position:absolute; top:100%; left:0; right:0; background:var(--card-bg); border:1px solid var(--border-color); border-top:none; border-radius:0 0 8px 8px; max-height:220px; overflow-y:auto; z-index:1000; box-shadow:0 8px 24px rgba(0,0,0,0.4); }
+.autocomplete-dropdown.show { display:block; }
+.autocomplete-item { padding:0.65rem 0.875rem; cursor:pointer; display:flex; justify-content:space-between; align-items:center; transition:background 0.15s; border-bottom:1px solid rgba(255,255,255,0.04); }
+.autocomplete-item:last-child { border-bottom:none; }
+.autocomplete-item:hover, .autocomplete-item.active { background:rgba(107,70,193,0.25); }
+.autocomplete-item .ac-symbol { font-weight:700; color:var(--light-purple); font-size:0.95rem; }
+.autocomplete-item .ac-name { color:var(--text-muted); font-size:0.82rem; text-align:right; max-width:60%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 label { display:block; margin-bottom:0.5rem; color:var(--text-muted); font-weight:500; font-size:0.9rem; text-transform:uppercase; letter-spacing:0.5px; }
 input[type="text"],input[type="number"],input[type="date"],select { width:100%; padding:0.875rem; background:rgba(10,10,10,0.6); border:1px solid var(--border-color); border-radius:8px; color:var(--text-light); font-size:1rem; transition:all 0.3s ease; }
 input:focus,select:focus { outline:none; border-color:var(--accent-purple); box-shadow:0 0 0 3px rgba(107,70,193,0.2); }

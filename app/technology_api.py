@@ -1,9 +1,24 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 import yfinance as yf
 from .stock_categories import stocks_by_category
 
 router = APIRouter()
+
+# Build a flat list of all known symbols for autocomplete
+_all_symbols = []
+_seen = set()
+for _cat, _stocks in stocks_by_category.items():
+    for _s in _stocks:
+        if _s["symbol"] not in _seen:
+            _all_symbols.append({"symbol": _s["symbol"], "name": _s["name"]})
+            _seen.add(_s["symbol"])
+
+
+@router.get("/symbols/search")
+def search_symbols(q: str = Query("", min_length=0)):
+    """Return all known symbols (for client-side filtering)."""
+    return _all_symbols
 
 @router.get("/stocks-by-category")
 def get_stocks_by_category():
