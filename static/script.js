@@ -19,10 +19,23 @@ async function getAllSymbols() {
     return _acCache;
 }
 
+async function searchSymbols(query) {
+    if(!query || query.length === 0) return getAllSymbols().then(all => all.slice(0, 10));
+    // For queries with 1+ characters, search server-side (Yahoo Finance)
+    try {
+        const res = await fetch('/api/symbols/search?q=' + encodeURIComponent(query));
+        return await res.json();
+    } catch(e) {
+        // Fallback to local filtering
+        const all = await getAllSymbols();
+        return filterSymbols(all, query);
+    }
+}
+
 function filterSymbols(all, query) {
     if(!query) return all.slice(0, 10);
     const qu = query.toUpperCase();
-    return all.filter(s => s.symbol.toUpperCase().startsWith(qu)).slice(0, 12);
+    return all.filter(s => s.symbol.toUpperCase().startsWith(qu) || s.name.toUpperCase().includes(qu)).slice(0, 12);
 }
 
 function setupAutocomplete(inputId, dropdownId, onSelect) {
@@ -35,14 +48,15 @@ function setupAutocomplete(inputId, dropdownId, onSelect) {
 
     async function showSuggestions() {
         if(justSelected) { justSelected = false; return; }
-        const all = await getAllSymbols();
         const val = input.value.trim();
-        const results = filterSymbols(all, val);
+        const results = await searchSymbols(val);
         activeIdx = -1;
         if(!results.length) { dropdown.classList.remove('show'); return; }
         dropdown.innerHTML = results.map((r, i) =>
             '<div class="autocomplete-item" data-symbol="' + r.symbol + '" data-idx="' + i + '">' +
-            '<span class="ac-symbol">' + r.symbol + '</span></div>'
+            '<span class="ac-symbol">' + r.symbol + '</span>' +
+            (r.name ? '<span class="ac-name" style="margin-left:0.5rem;color:var(--text-muted);font-size:0.85em;">' + r.name + '</span>' : '') +
+            '</div>'
         ).join('');
         dropdown.classList.add('show');
         dropdown.querySelectorAll('.autocomplete-item').forEach(item => {
@@ -69,12 +83,12 @@ function setupAutocomplete(inputId, dropdownId, onSelect) {
 
     input.addEventListener('input', function() {
         clearTimeout(_acDebounce);
-        _acDebounce = setTimeout(showSuggestions, 100);
+        _acDebounce = setTimeout(showSuggestions, 250);
     });
 
     input.addEventListener('focus', function() {
         clearTimeout(_acDebounce);
-        _acDebounce = setTimeout(showSuggestions, 100);
+        _acDebounce = setTimeout(showSuggestions, 250);
     });
 
     input.addEventListener('blur', function() {
@@ -136,6 +150,10 @@ async function loadPrice() {
     const cached = _cache.price.get(symbol);
     if(cached && (now()-cached.ts)<minutes(5)) { data = cached.data; }
     else { const res = await fetch('/api/price/'+symbol); data = await res.json(); _cache.price.set(symbol, {data, ts:now()}); }
+    if(!data.price || data.price <= 0) {
+        priceEl.innerHTML = '<span class="negative">Symbol "'+data.symbol+'" not found or has no price data.</span>';
+        return;
+    }
     priceEl.innerHTML = 'Price of '+data.symbol+': $'+data.price+' <a href="#" onclick="openStockModal(\''+data.symbol+'\'); return false;" style="color:var(--light-purple);margin-left:1rem;">Detail</a>';
 }
 
@@ -144,22 +162,59 @@ function onOrderTypeChange() {
     const ot = document.getElementById('order-type').value;
     const tpg = document.getElementById('target-price-group');
     tpg.style.display = (ot === 'market') ? 'none' : 'block';
-    const btnBuy = document.querySelector('.btn-buy');
-    const btnSell = document.querySelector('.btn-sell');
-    if(ot === 'target_sell') { btnBuy.style.display = 'none'; btnSell.style.display = ''; }
-    else if(ot === 'target_buy') { btnSell.style.display = 'none'; btnBuy.style.display = ''; }
-    else { btnBuy.style.display = ''; btnSell.style.display = ''; }
+    const tradeButtons = document.querySelector('.trade-buttons');
+    const btnBuy = tradeButtons ? tradeButtons.querySelector('.btn-buy') : null;
+    const btnSell = tradeButtons ? tradeButtons.querySelector('.btn-sell') : null;
+    if(ot === 'target_sell') { if(btnBuy) btnBuy.style.display = 'none'; if(btnSell) btnSell.style.display = ''; }
+    else if(ot === 'target_buy') { if(btnSell) btnSell.style.display = 'none'; if(btnBuy) btnBuy.style.display = ''; }
+    else { if(btnBuy) btnBuy.style.display = ''; if(btnSell) btnSell.style.display = ''; }
 }
 
 // ===== EXECUTE TRADE =====
+let tradeAmountMode = 'units'; // 'units' or 'usd'
+
+function setTradeAmountMode(mode) {
+    tradeAmountMode = mode;
+    document.querySelectorAll('.trade-amount-mode-btn').forEach(b => b.classList.remove('active'));
+    const activeBtn = document.querySelector('.trade-amount-mode-btn[data-mode="'+mode+'"]');
+    if(activeBtn) activeBtn.classList.add('active');
+    const label = document.getElementById('amount-label');
+    const input = document.getElementById('amount');
+    if(mode === 'usd') {
+        label.textContent = 'Amount (USD $)';
+        input.placeholder = '$100';
+        input.value = '';
+    } else {
+        label.textContent = 'Amount (shares/units)';
+        input.placeholder = '1';
+        input.value = '1';
+    }
+}
+
 async function executeTrade(action) {
     const symbol = (document.getElementById('symbol').value || '').trim().toUpperCase();
-    const amount = parseFloat(document.getElementById('amount').value);
+    let rawAmount = parseFloat(document.getElementById('amount').value);
     const orderType = document.getElementById('order-type').value;
     const targetPrice = parseFloat(document.getElementById('target-price').value) || 0;
     const statusEl = document.getElementById('status');
-    if(!symbol || isNaN(amount) || amount <= 0) { statusEl.innerText = 'Enter valid symbol and amount.'; return; }
+    if(!symbol || isNaN(rawAmount) || rawAmount <= 0) { statusEl.innerText = 'Enter valid symbol and amount.'; return; }
     if(orderType !== 'market' && targetPrice <= 0) { statusEl.innerText = 'Enter a target price for this order type.'; return; }
+
+    let amount = rawAmount;
+    // If USD mode, convert dollar amount to shares
+    if(tradeAmountMode === 'usd' && orderType === 'market') {
+        try {
+            const priceRes = await fetch('/api/price/'+symbol);
+            const priceData = await priceRes.json();
+            if(!priceData.price || priceData.price <= 0) {
+                statusEl.innerHTML = '<span class="negative">Symbol "'+symbol+'" not found or has no price data.</span>';
+                return;
+            }
+            amount = rawAmount / priceData.price;
+            if(amount <= 0) { statusEl.innerHTML = '<span class="negative">Amount too small.</span>'; return; }
+        } catch(e) { statusEl.innerText = 'Error getting price: '+e.message; return; }
+    }
+
     try {
         const res = await fetch('/api/trade', {
             method: 'POST',
@@ -169,7 +224,13 @@ async function executeTrade(action) {
         const data = await res.json();
         if(data.error) { statusEl.innerHTML = '<span class="negative">'+data.error+'</span>'; }
         else { statusEl.innerHTML = '<span class="positive">'+data.message+'</span>'; }
-        invalidateCache(['portfolio']); refreshBalanceBar();
+        invalidateCache(['portfolio','portfolioHistory']);
+        refreshBalanceBar();
+        loadPortfolio(true);
+        loadPendingOrders();
+        loadTradeHistory();
+        loadTradeStats();
+        loadPies();
     } catch(e) { statusEl.innerText = 'Error: '+e.message; }
 }
 
@@ -344,6 +405,25 @@ async function loadPortfolioChart(force=false) {
             scales: {
                 y: {
                     beginAtZero: false,
+                    suggestedMin: (function() {
+                        const minV = Math.min(...values);
+                        const maxV = Math.max(...values);
+                        const range = maxV - minV;
+                        const avg = (maxV + minV) / 2;
+                        // Ensure the range is at least 0.5% of average to avoid extreme zoom
+                        const minRange = avg * 0.005;
+                        const padding = Math.max(range, minRange) * 0.3;
+                        return minV - padding;
+                    })(),
+                    suggestedMax: (function() {
+                        const minV = Math.min(...values);
+                        const maxV = Math.max(...values);
+                        const range = maxV - minV;
+                        const avg = (maxV + minV) / 2;
+                        const minRange = avg * 0.005;
+                        const padding = Math.max(range, minRange) * 0.3;
+                        return maxV + padding;
+                    })(),
                     ticks: { callback: function(v) { return '$' + v.toLocaleString(); } },
                     grid: { color: 'rgba(255,255,255,0.06)' }
                 },
@@ -464,6 +544,34 @@ async function loadTradeStats() {
 }
 
 // ===== RESET ACCOUNT =====
+async function sellAll() {
+    if(!confirm('Are you sure you want to sell ALL positions at market price?')) return;
+    try {
+        const res = await fetch('/api/sell-all', {method:'POST'});
+        const data = await res.json();
+        if(data.error && !data.results) {
+            alert('Error: ' + data.error);
+        } else {
+            let msg = data.message || 'Positions sold.';
+            if(data.results) {
+                msg += '\n\n';
+                for(const r of data.results) {
+                    if(r.error) msg += r.symbol + ': FAILED - ' + r.error + '\n';
+                    else msg += r.symbol + ': ' + r.message + '\n';
+                }
+            }
+            alert(msg);
+        }
+        invalidateCache(['portfolio','portfolioHistory']);
+        refreshBalanceBar();
+        loadPortfolio(true);
+        loadPendingOrders();
+        loadTradeHistory();
+        loadTradeStats();
+        loadPies();
+    } catch(e) { alert('Error selling all: ' + e.message); }
+}
+
 async function resetAccount() {
     if(!confirm('Are you sure you want to reset your account? All data will be lost.')) return;
     await fetch('/api/reset', {method:'POST'});
@@ -686,14 +794,25 @@ async function buyPie(pieId) {
     try {
         const res = await fetch('/api/pies/'+pieId+'/buy', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({amount})});
         const data = await res.json();
-        if(data.error) { statusEl.innerHTML = '<span class="negative">'+data.error+'</span>'; }
+        if(data.error && !data.purchases) { statusEl.innerHTML = '<span class="negative">'+data.error+'</span>'; }
         else {
-            let msg = '<span class="positive">Bought pie for $'+amount+':<br>';
-            for(const p of data.purchases) {
-                if(p.error) msg += p.symbol+': '+p.error+'<br>';
+            const purchases = data.purchases || [];
+            let successCount = data.success_count || 0;
+            let failCount = data.fail_count || 0;
+            let msg = '';
+            if(successCount === 0) {
+                msg = '<span class="negative">No purchases were executed:<br>';
+            } else if(failCount > 0) {
+                msg = '<span class="positive">Bought pie for $'+amount+' ('+successCount+' succeeded, '+failCount+' failed):<br>';
+            } else {
+                msg = '<span class="positive">Bought pie for $'+amount+':<br>';
+            }
+            for(const p of purchases) {
+                if(p.error) msg += '<span class="negative">'+p.symbol+': '+p.error+'</span><br>';
+                else if(p.result && p.result.error) msg += '<span class="negative">'+p.symbol+': '+p.result.error+'</span><br>';
                 else msg += p.symbol+': '+p.shares+' shares ($'+p.allocated+')<br>';
             }
-            msg += '</span>';
+            msg += (successCount === 0 ? '</span>' : '</span>');
             statusEl.innerHTML = msg;
             invalidateCache(['portfolio']); refreshBalanceBar();
             loadPortfolio(true);
@@ -980,9 +1099,12 @@ async function executeModalSell() {
             if(currentModalHolding.amount <= 0.0001) {
                 document.getElementById('modal-sell-panel').style.display = 'none';
             }
-            invalidateCache(['portfolio']);
+            invalidateCache(['portfolio','portfolioHistory']);
             refreshBalanceBar();
             await loadPortfolio(true);
+            loadPendingOrders();
+            loadTradeHistory();
+            loadTradeStats();
             loadPies();
         }
     } catch(e) { statusEl.innerHTML = '<span class="negative">Error: '+e.message+'</span>'; }

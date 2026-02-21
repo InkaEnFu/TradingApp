@@ -153,6 +153,9 @@ tbody tr:hover { background:rgba(107,70,193,0.1); }
 .sell-mode-btn { flex:1; padding:0.6rem; background:rgba(107,70,193,0.2); border:1px solid var(--border-color); border-radius:8px; color:var(--text-light); font-weight:500; cursor:pointer; transition:all 0.2s ease; font-size:0.9rem; }
 .sell-mode-btn:hover { background:rgba(107,70,193,0.4); }
 .sell-mode-btn.active { background:var(--accent-purple); border-color:var(--accent-purple); }
+.trade-amount-mode-btn { background:rgba(107,70,193,0.2); border:1px solid var(--border-color); border-radius:6px; color:var(--text-light); cursor:pointer; transition:all 0.2s; }
+.trade-amount-mode-btn:hover { background:rgba(107,70,193,0.4); }
+.trade-amount-mode-btn.active { background:var(--accent-purple); border-color:var(--accent-purple); color:#fff; }
 .sell-input-row { margin-bottom:0.75rem; }
 .sell-input-row label { display:block; color:var(--text-muted); font-size:0.85rem; margin-bottom:0.3rem; }
 .sell-input-row input { width:100%; padding:0.6rem 0.8rem; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); border-radius:8px; color:var(--text-light); font-size:1rem; }

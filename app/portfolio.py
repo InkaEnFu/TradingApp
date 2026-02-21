@@ -139,8 +139,21 @@ def sell_stock(symbol: str, amount: float, order_type: str = "market") -> dict:
     new_amount = current_amount - amount
     if new_amount <= 0.0001:  # float tolerance
         cursor.execute("DELETE FROM holdings WHERE symbol = ?", (symbol,))
+        # Cancel any pending target_sell / stop_loss orders for this symbol (position fully closed)
+        cursor.execute(
+            "UPDATE orders SET status = 'cancelled' WHERE symbol = ? AND status = 'pending' AND order_type IN ('target_sell', 'stop_loss')",
+            (symbol,),
+        )
     else:
         cursor.execute("UPDATE holdings SET amount = ? WHERE symbol = ?", (new_amount, symbol))
+        # Cancel pending sell orders that exceed the remaining holding
+        cursor.execute(
+            "SELECT id, amount FROM orders WHERE symbol = ? AND status = 'pending' AND order_type IN ('target_sell', 'stop_loss')",
+            (symbol,),
+        )
+        for oid, order_amount in cursor.fetchall():
+            if order_amount > new_amount:
+                cursor.execute("UPDATE orders SET status = 'cancelled' WHERE id = ?", (oid,))
 
     # Record trade
     cursor.execute(
@@ -477,6 +490,41 @@ def get_portfolio_history(period: str = '24h'):
 
 # ── Reset ────────────────────────────────────────────────────────────
 
+def sell_all() -> dict:
+    """Sell all holdings at market price."""
+    cursor.execute("SELECT symbol, amount FROM holdings")
+    holdings = cursor.fetchall()
+    if not holdings:
+        return {"error": "No positions to sell."}
+
+    results = []
+    success_count = 0
+    fail_count = 0
+    total_revenue = 0.0
+    total_profit = 0.0
+
+    for symbol, amount in holdings:
+        res = sell_stock(symbol, amount)
+        if res.get("status") == "ok":
+            success_count += 1
+            results.append({"symbol": symbol, "amount": amount, "message": res["message"]})
+            # Extract profit from message if possible
+        else:
+            fail_count += 1
+            results.append({"symbol": symbol, "amount": amount, "error": res.get("error", "Unknown error")})
+
+    if success_count == 0:
+        return {"error": "Failed to sell any positions.", "results": results}
+
+    return {
+        "status": "ok",
+        "message": f"Sold {success_count} position(s)." + (f" {fail_count} failed." if fail_count > 0 else ""),
+        "results": results,
+        "success_count": success_count,
+        "fail_count": fail_count,
+    }
+
+
 def reset_account() -> dict:
     """Wipe everything and start fresh with $100,000."""
     cursor.execute("DELETE FROM holdings")
@@ -605,16 +653,28 @@ def buy_pie(pie_id: int, total_amount: float) -> dict:
         return {"error": "Pie not found or has no stocks."}
 
     results = []
+    success_count = 0
+    fail_count = 0
     for symbol, percent in slices:
         alloc = total_amount * (percent / 100.0)
         price = get_price(symbol)
         if price <= 0:
             results.append({"symbol": symbol, "error": f"Cannot get price for {symbol}."})
+            fail_count += 1
             continue
         shares = alloc / price
         if shares <= 0:
+            results.append({"symbol": symbol, "error": "Allocation too small to buy any shares."})
+            fail_count += 1
             continue
         res = buy_stock(symbol, round(shares, 6))
+        if res.get("status") == "ok":
+            success_count += 1
+        else:
+            fail_count += 1
         results.append({"symbol": symbol, "allocated": round(alloc, 2), "shares": round(shares, 6), "result": res})
 
-    return {"status": "ok", "total": total_amount, "purchases": results}
+    if success_count == 0:
+        return {"error": "No purchases were executed. Check amounts and balances.", "purchases": results}
+
+    return {"status": "ok", "total": total_amount, "purchases": results, "success_count": success_count, "fail_count": fail_count}

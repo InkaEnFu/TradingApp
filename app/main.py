@@ -11,7 +11,7 @@ from .portfolio import (
     buy_stock, sell_stock, get_portfolio, get_portfolio_history_24h, get_portfolio_history,
     get_account_info, create_order, cancel_order, get_pending_orders,
     check_pending_orders, get_trade_history, get_trade_stats, reset_account,
-    snapshot_portfolio_value,
+    snapshot_portfolio_value, sell_all,
     create_pie, get_pies, delete_pie, buy_pie, update_pie,
 )
 from .technology_api import router as technology_router
@@ -170,6 +170,11 @@ async def api_trade_stats():
 @app.post("/api/reset")
 async def api_reset():
     return reset_account()
+
+
+@app.post("/api/sell-all")
+async def api_sell_all():
+    return sell_all()
 
 
 # === Pies ===
