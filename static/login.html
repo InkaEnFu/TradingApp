@@ -87,6 +87,25 @@
             width: 100%;
             margin-top: 0.5rem;
         }
+        .auth-card input[type="password"] {
+            width: 100%;
+            padding: 0.875rem;
+            background: rgba(10,10,10,0.6);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-light);
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            box-sizing: border-box;
+        }
+        .auth-card input[type="password"]:focus {
+            outline: none;
+            border-color: var(--accent-purple);
+            box-shadow: 0 0 0 3px rgba(107,70,193,0.2);
+        }
+        .auth-card input[type="password"]::placeholder {
+            color: var(--text-muted);
+        }
         .auth-logo {
             text-align: center;
             margin-bottom: 0.5rem;
