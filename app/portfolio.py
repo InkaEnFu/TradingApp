@@ -7,25 +7,25 @@ FEE_RATE = 0.001  # 0.1 % per trade
 
 # ── Account helpers ──────────────────────────────────────────────────
 
-def get_cash_balance() -> float:
-    cursor.execute("SELECT cash_balance FROM account WHERE id = 1")
+def get_cash_balance(user_id: int) -> float:
+    cursor.execute("SELECT cash_balance FROM account WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
     return row[0] if row else 100000.0
 
 
-def _update_cash(delta: float):
-    cursor.execute("UPDATE account SET cash_balance = cash_balance + ? WHERE id = 1", (delta,))
+def _update_cash(user_id: int, delta: float):
+    cursor.execute("UPDATE account SET cash_balance = cash_balance + ? WHERE user_id = ?", (delta, user_id))
     conn.commit()
 
 
-def get_account_info() -> dict:
-    cursor.execute("SELECT cash_balance, initial_balance FROM account WHERE id = 1")
+def get_account_info(user_id: int) -> dict:
+    cursor.execute("SELECT cash_balance, initial_balance FROM account WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
     cash = row[0] if row else 100000.0
     initial = row[1] if row else 100000.0
 
     # Invested value
-    cursor.execute("SELECT symbol, amount FROM holdings")
+    cursor.execute("SELECT symbol, amount FROM holdings WHERE user_id = ?", (user_id,))
     holdings = cursor.fetchall()
     invested_value = 0.0
     for symbol, amount in holdings:
@@ -47,7 +47,7 @@ def get_account_info() -> dict:
 
 # ── Market buy / sell ────────────────────────────────────────────────
 
-def buy_stock(symbol: str, amount: float, order_type: str = "market") -> dict:
+def buy_stock(user_id: int, symbol: str, amount: float, order_type: str = "market") -> dict:
     if amount <= 0:
         return {"error": "Amount must be positive."}
 
@@ -59,15 +59,15 @@ def buy_stock(symbol: str, amount: float, order_type: str = "market") -> dict:
     fee = round(cost * FEE_RATE, 2)
     total_cost = cost + fee
 
-    cash = get_cash_balance()
+    cash = get_cash_balance(user_id)
     if total_cost > cash:
         return {"error": f"Insufficient funds. Need ${round(total_cost,2)}, have ${round(cash,2)}."}
 
     # Deduct cash
-    _update_cash(-total_cost)
+    _update_cash(user_id, -total_cost)
 
     # Update holdings
-    cursor.execute("SELECT amount, avg_buy_price FROM holdings WHERE symbol = ?", (symbol,))
+    cursor.execute("SELECT amount, avg_buy_price FROM holdings WHERE user_id = ? AND symbol = ?", (user_id, symbol))
     row = cursor.fetchone()
 
     if row:
@@ -76,21 +76,21 @@ def buy_stock(symbol: str, amount: float, order_type: str = "market") -> dict:
         new_amount = old_amount + amount
         new_avg = ((old_amount * old_avg) + (amount * current_price)) / new_amount
         cursor.execute(
-            "UPDATE holdings SET amount = ?, avg_buy_price = ? WHERE symbol = ?",
-            (new_amount, new_avg, symbol),
+            "UPDATE holdings SET amount = ?, avg_buy_price = ? WHERE user_id = ? AND symbol = ?",
+            (new_amount, new_avg, user_id, symbol),
         )
     else:
         cursor.execute(
-            "INSERT INTO holdings (symbol, amount, avg_buy_price) VALUES (?, ?, ?)",
-            (symbol, amount, current_price),
+            "INSERT INTO holdings (user_id, symbol, amount, avg_buy_price) VALUES (?, ?, ?, ?)",
+            (user_id, symbol, amount, current_price),
         )
 
     # Record trade
     cursor.execute(
         """INSERT INTO trade_history
-           (symbol, action, amount, price, fee, total, profit, timestamp, order_type)
-           VALUES (?, 'buy', ?, ?, ?, ?, 0, ?, ?)""",
-        (symbol, amount, current_price, fee, total_cost, int(time.time()), order_type),
+           (user_id, symbol, action, amount, price, fee, total, profit, timestamp, order_type)
+           VALUES (?, ?, 'buy', ?, ?, ?, ?, 0, ?, ?)""",
+        (user_id, symbol, amount, current_price, fee, total_cost, int(time.time()), order_type),
     )
     conn.commit()
 
@@ -100,11 +100,11 @@ def buy_stock(symbol: str, amount: float, order_type: str = "market") -> dict:
     }
 
 
-def sell_stock(symbol: str, amount: float, order_type: str = "market") -> dict:
+def sell_stock(user_id: int, symbol: str, amount: float, order_type: str = "market") -> dict:
     if amount <= 0:
         return {"error": "Amount must be positive."}
 
-    cursor.execute("SELECT amount, avg_buy_price FROM holdings WHERE symbol = ?", (symbol,))
+    cursor.execute("SELECT amount, avg_buy_price FROM holdings WHERE user_id = ? AND symbol = ?", (user_id, symbol))
     row = cursor.fetchone()
 
     if not row:
@@ -133,23 +133,23 @@ def sell_stock(symbol: str, amount: float, order_type: str = "market") -> dict:
     profit = total_revenue - cost_basis
 
     # Credit cash
-    _update_cash(total_revenue)
+    _update_cash(user_id, total_revenue)
 
     # Update holdings
     new_amount = current_amount - amount
     if new_amount <= 0.0001:  # float tolerance
-        cursor.execute("DELETE FROM holdings WHERE symbol = ?", (symbol,))
+        cursor.execute("DELETE FROM holdings WHERE user_id = ? AND symbol = ?", (user_id, symbol))
         # Cancel any pending target_sell / stop_loss orders for this symbol (position fully closed)
         cursor.execute(
-            "UPDATE orders SET status = 'cancelled' WHERE symbol = ? AND status = 'pending' AND order_type IN ('target_sell', 'stop_loss')",
-            (symbol,),
+            "UPDATE orders SET status = 'cancelled' WHERE user_id = ? AND symbol = ? AND status = 'pending' AND order_type IN ('target_sell', 'stop_loss')",
+            (user_id, symbol),
         )
     else:
-        cursor.execute("UPDATE holdings SET amount = ? WHERE symbol = ?", (new_amount, symbol))
+        cursor.execute("UPDATE holdings SET amount = ? WHERE user_id = ? AND symbol = ?", (new_amount, user_id, symbol))
         # Cancel pending sell orders that exceed the remaining holding
         cursor.execute(
-            "SELECT id, amount FROM orders WHERE symbol = ? AND status = 'pending' AND order_type IN ('target_sell', 'stop_loss')",
-            (symbol,),
+            "SELECT id, amount FROM orders WHERE user_id = ? AND symbol = ? AND status = 'pending' AND order_type IN ('target_sell', 'stop_loss')",
+            (user_id, symbol),
         )
         for oid, order_amount in cursor.fetchall():
             if order_amount > new_amount:
@@ -158,9 +158,9 @@ def sell_stock(symbol: str, amount: float, order_type: str = "market") -> dict:
     # Record trade
     cursor.execute(
         """INSERT INTO trade_history
-           (symbol, action, amount, price, fee, total, profit, timestamp, order_type)
-           VALUES (?, 'sell', ?, ?, ?, ?, ?, ?, ?)""",
-        (symbol, amount, current_price, fee, total_revenue, profit, int(time.time()), order_type),
+           (user_id, symbol, action, amount, price, fee, total, profit, timestamp, order_type)
+           VALUES (?, ?, 'sell', ?, ?, ?, ?, ?, ?, ?)""",
+        (user_id, symbol, amount, current_price, fee, total_revenue, profit, int(time.time()), order_type),
     )
     conn.commit()
 
@@ -172,7 +172,7 @@ def sell_stock(symbol: str, amount: float, order_type: str = "market") -> dict:
 
 # ── Pending orders (limit / stop-loss / target-sell / target-buy) ────
 
-def create_order(symbol: str, order_type: str, action: str, amount: float, target_price: float) -> dict:
+def create_order(user_id: int, symbol: str, order_type: str, action: str, amount: float, target_price: float) -> dict:
     """Create a pending order.
     order_type: 'limit', 'stop_loss', 'target_sell', 'target_buy'
     action: 'buy' or 'sell'
@@ -188,31 +188,32 @@ def create_order(symbol: str, order_type: str, action: str, amount: float, targe
 
     # For stop_loss / target_sell the user must own the asset
     if order_type in ("stop_loss", "target_sell"):
-        cursor.execute("SELECT amount FROM holdings WHERE symbol = ?", (symbol,))
+        cursor.execute("SELECT amount FROM holdings WHERE user_id = ? AND symbol = ?", (user_id, symbol))
         row = cursor.fetchone()
         if not row or row[0] < amount:
             return {"error": f"Not enough holdings in {symbol} for this order."}
 
     cursor.execute(
-        """INSERT INTO orders (symbol, order_type, action, amount, target_price, created_at, status)
-           VALUES (?, ?, ?, ?, ?, ?, 'pending')""",
-        (symbol, order_type, action, amount, target_price, int(time.time())),
+        """INSERT INTO orders (user_id, symbol, order_type, action, amount, target_price, created_at, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')""",
+        (user_id, symbol, order_type, action, amount, target_price, int(time.time())),
     )
     conn.commit()
     return {"status": "ok", "message": f"{order_type} order created for {amount}x {symbol} @ ${target_price}."}
 
 
-def cancel_order(order_id: int) -> dict:
-    cursor.execute("UPDATE orders SET status = 'cancelled' WHERE id = ? AND status = 'pending'", (order_id,))
+def cancel_order(user_id: int, order_id: int) -> dict:
+    cursor.execute("UPDATE orders SET status = 'cancelled' WHERE id = ? AND user_id = ? AND status = 'pending'", (order_id, user_id))
     conn.commit()
     if cursor.rowcount == 0:
         return {"error": "Order not found or already processed."}
     return {"status": "ok"}
 
 
-def get_pending_orders() -> list:
+def get_pending_orders(user_id: int) -> list:
     cursor.execute(
-        "SELECT id, symbol, order_type, action, amount, target_price, created_at FROM orders WHERE status = 'pending' ORDER BY created_at DESC"
+        "SELECT id, symbol, order_type, action, amount, target_price, created_at FROM orders WHERE user_id = ? AND status = 'pending' ORDER BY created_at DESC",
+        (user_id,),
     )
     rows = cursor.fetchall()
     return [
@@ -224,15 +225,21 @@ def get_pending_orders() -> list:
     ]
 
 
-def check_pending_orders() -> list:
+def check_pending_orders(user_id: int = None) -> list:
     """Check all pending orders and execute if conditions met. Returns list of executed orders."""
-    cursor.execute(
-        "SELECT id, symbol, order_type, action, amount, target_price FROM orders WHERE status = 'pending'"
-    )
+    if user_id:
+        cursor.execute(
+            "SELECT id, user_id, symbol, order_type, action, amount, target_price FROM orders WHERE user_id = ? AND status = 'pending'",
+            (user_id,),
+        )
+    else:
+        cursor.execute(
+            "SELECT id, user_id, symbol, order_type, action, amount, target_price FROM orders WHERE status = 'pending'"
+        )
     pending = cursor.fetchall()
     executed = []
 
-    for oid, symbol, otype, action, amount, target in pending:
+    for oid, uid, symbol, otype, action, amount, target in pending:
         try:
             price = get_price(symbol)
             if price <= 0:
@@ -252,9 +259,9 @@ def check_pending_orders() -> list:
 
             if should_execute:
                 if action == "buy" or otype == "limit" and action == "buy":
-                    result = buy_stock(symbol, amount, order_type=otype)
+                    result = buy_stock(uid, symbol, amount, order_type=otype)
                 else:
-                    result = sell_stock(symbol, amount, order_type=otype)
+                    result = sell_stock(uid, symbol, amount, order_type=otype)
 
                 if result.get("status") == "ok":
                     cursor.execute("UPDATE orders SET status = 'executed' WHERE id = ?", (oid,))
@@ -272,10 +279,10 @@ def check_pending_orders() -> list:
 
 # ── Trade history & stats ────────────────────────────────────────────
 
-def get_trade_history(limit: int = 50) -> list:
+def get_trade_history(user_id: int, limit: int = 50) -> list:
     cursor.execute(
-        "SELECT id, symbol, action, amount, price, fee, total, profit, timestamp, order_type FROM trade_history ORDER BY timestamp DESC LIMIT ?",
-        (limit,),
+        "SELECT id, symbol, action, amount, price, fee, total, profit, timestamp, order_type FROM trade_history WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?",
+        (user_id, limit),
     )
     rows = cursor.fetchall()
     return [
@@ -288,10 +295,11 @@ def get_trade_history(limit: int = 50) -> list:
     ]
 
 
-def get_trade_stats() -> dict:
+def get_trade_stats(user_id: int) -> dict:
     """Win/Loss ratio and other stats from closed sell trades."""
     cursor.execute(
-        "SELECT profit FROM trade_history WHERE action = 'sell'"
+        "SELECT profit FROM trade_history WHERE user_id = ? AND action = 'sell'",
+        (user_id,),
     )
     rows = cursor.fetchall()
 
@@ -302,7 +310,7 @@ def get_trade_stats() -> dict:
     losses = sum(1 for r in rows if r[0] <= 0)
     total_profit = sum(r[0] for r in rows)
 
-    cursor.execute("SELECT COUNT(*), SUM(fee) FROM trade_history")
+    cursor.execute("SELECT COUNT(*), SUM(fee) FROM trade_history WHERE user_id = ?", (user_id,))
     total_row = cursor.fetchone()
     total_trades = total_row[0] or 0
     total_fees = total_row[1] or 0
@@ -325,8 +333,8 @@ def get_trade_stats() -> dict:
 
 # ── Portfolio overview ───────────────────────────────────────────────
 
-def get_portfolio():
-    cursor.execute("SELECT symbol, amount, avg_buy_price FROM holdings")
+def get_portfolio(user_id: int):
+    cursor.execute("SELECT symbol, amount, avg_buy_price FROM holdings WHERE user_id = ?", (user_id,))
     rows = cursor.fetchall()
 
     portfolio = []
@@ -354,27 +362,27 @@ def get_portfolio():
             "price_change_24h": round(price_change_24h, 2),
         })
 
-    cash = get_cash_balance()
+    cash = get_cash_balance(user_id)
     total_value = round(cash + invested_value, 2)
 
     # Get initial balance for overall P&L
-    cursor.execute("SELECT initial_balance FROM account WHERE id = 1")
+    cursor.execute("SELECT initial_balance FROM account WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
     initial_balance = row[0] if row else 100000
 
     # Save to history
     current_time = int(time.time())
     cursor.execute(
-        "INSERT INTO portfolio_history (timestamp, total_value) VALUES (?, ?)",
-        (current_time, total_value),
+        "INSERT INTO portfolio_history (user_id, timestamp, total_value) VALUES (?, ?, ?)",
+        (user_id, current_time, total_value),
     )
     conn.commit()
 
     # 24h change
     time_24h_ago = current_time - 86400
     cursor.execute(
-        "SELECT total_value FROM portfolio_history WHERE timestamp >= ? ORDER BY timestamp ASC LIMIT 1",
-        (time_24h_ago,),
+        "SELECT total_value FROM portfolio_history WHERE user_id = ? AND timestamp >= ? ORDER BY timestamp ASC LIMIT 1",
+        (user_id, time_24h_ago),
     )
     old_row = cursor.fetchone()
 
@@ -386,7 +394,7 @@ def get_portfolio():
 
     # Cleanup old records (>1 year)
     time_1y_ago = current_time - (365 * 86400)
-    cursor.execute("DELETE FROM portfolio_history WHERE timestamp < ?", (time_1y_ago,))
+    cursor.execute("DELETE FROM portfolio_history WHERE user_id = ? AND timestamp < ?", (user_id, time_1y_ago))
     conn.commit()
 
     return {
@@ -400,21 +408,21 @@ def get_portfolio():
     }
 
 
-def snapshot_portfolio_value():
+def snapshot_portfolio_value(user_id: int):
     """Lightweight snapshot – calculate current total and store it.
     Called by the background scheduler every few minutes."""
     try:
-        cursor.execute("SELECT symbol, amount FROM holdings")
+        cursor.execute("SELECT symbol, amount FROM holdings WHERE user_id = ?", (user_id,))
         holdings = cursor.fetchall()
         invested = 0.0
         for symbol, amount in holdings:
             invested += amount * get_price(symbol)
-        cash = get_cash_balance()
+        cash = get_cash_balance(user_id)
         total = round(cash + invested, 2)
         current_time = int(time.time())
         cursor.execute(
-            "INSERT INTO portfolio_history (timestamp, total_value) VALUES (?, ?)",
-            (current_time, total),
+            "INSERT INTO portfolio_history (user_id, timestamp, total_value) VALUES (?, ?, ?)",
+            (user_id, current_time, total),
         )
         conn.commit()
         return total
@@ -422,12 +430,12 @@ def snapshot_portfolio_value():
         return None
 
 
-def get_portfolio_history_24h():
+def get_portfolio_history_24h(user_id: int):
     """Return portfolio value aggregated into 24 hourly buckets."""
-    return get_portfolio_history('24h')
+    return get_portfolio_history(user_id, '24h')
 
 
-def get_portfolio_history(period: str = '24h'):
+def get_portfolio_history(user_id: int, period: str = '24h'):
     """Return portfolio value history for the given period.
 
     Supported periods: '1w' (week), '1m' (month), '1y' (year), 'max', '24h'.
@@ -448,12 +456,13 @@ def get_portfolio_history(period: str = '24h'):
     if config['seconds'] is not None:
         time_start = current_time - config['seconds']
         cursor.execute(
-            "SELECT timestamp, total_value FROM portfolio_history WHERE timestamp >= ? ORDER BY timestamp ASC",
-            (time_start,),
+            "SELECT timestamp, total_value FROM portfolio_history WHERE user_id = ? AND timestamp >= ? ORDER BY timestamp ASC",
+            (user_id, time_start),
         )
     else:
         cursor.execute(
-            "SELECT timestamp, total_value FROM portfolio_history ORDER BY timestamp ASC"
+            "SELECT timestamp, total_value FROM portfolio_history WHERE user_id = ? ORDER BY timestamp ASC",
+            (user_id,),
         )
     rows = cursor.fetchall()
 
@@ -490,9 +499,9 @@ def get_portfolio_history(period: str = '24h'):
 
 # ── Reset ────────────────────────────────────────────────────────────
 
-def sell_all() -> dict:
+def sell_all(user_id: int) -> dict:
     """Sell all holdings at market price."""
-    cursor.execute("SELECT symbol, amount FROM holdings")
+    cursor.execute("SELECT symbol, amount FROM holdings WHERE user_id = ?", (user_id,))
     holdings = cursor.fetchall()
     if not holdings:
         return {"error": "No positions to sell."}
@@ -504,7 +513,7 @@ def sell_all() -> dict:
     total_profit = 0.0
 
     for symbol, amount in holdings:
-        res = sell_stock(symbol, amount)
+        res = sell_stock(user_id, symbol, amount)
         if res.get("status") == "ok":
             success_count += 1
             results.append({"symbol": symbol, "amount": amount, "message": res["message"]})
@@ -525,22 +534,22 @@ def sell_all() -> dict:
     }
 
 
-def reset_account() -> dict:
+def reset_account(user_id: int) -> dict:
     """Wipe everything and start fresh with $100,000."""
-    cursor.execute("DELETE FROM holdings")
-    cursor.execute("DELETE FROM orders")
-    cursor.execute("DELETE FROM trade_history")
-    cursor.execute("DELETE FROM portfolio_history")
-    cursor.execute("DELETE FROM pie_slices")
-    cursor.execute("DELETE FROM pies")
-    cursor.execute("UPDATE account SET cash_balance = 100000 WHERE id = 1")
+    cursor.execute("DELETE FROM holdings WHERE user_id = ?", (user_id,))
+    cursor.execute("DELETE FROM orders WHERE user_id = ?", (user_id,))
+    cursor.execute("DELETE FROM trade_history WHERE user_id = ?", (user_id,))
+    cursor.execute("DELETE FROM portfolio_history WHERE user_id = ?", (user_id,))
+    cursor.execute("DELETE FROM pie_slices WHERE pie_id IN (SELECT id FROM pies WHERE user_id = ?)", (user_id,))
+    cursor.execute("DELETE FROM pies WHERE user_id = ?", (user_id,))
+    cursor.execute("UPDATE account SET cash_balance = 100000 WHERE user_id = ?", (user_id,))
     conn.commit()
     return {"status": "ok", "message": "Account reset to $100,000."}
 
 
 # ── Pies ─────────────────────────────────────────────────────────────
 
-def create_pie(name: str, slices: list) -> dict:
+def create_pie(user_id: int, name: str, slices: list) -> dict:
     """Create a pie.  slices = [{symbol, percent}, ...]"""
     if not name:
         return {"error": "Pie name is required."}
@@ -564,8 +573,8 @@ def create_pie(name: str, slices: list) -> dict:
         return {"error": f"Invalid or unknown symbols: {', '.join(invalid)}"}
 
     cursor.execute(
-        "INSERT INTO pies (name, created_at) VALUES (?, ?)",
-        (name, int(time.time())),
+        "INSERT INTO pies (user_id, name, created_at) VALUES (?, ?, ?)",
+        (user_id, name, int(time.time())),
     )
     pie_id = cursor.lastrowid
     for s in slices:
@@ -577,8 +586,8 @@ def create_pie(name: str, slices: list) -> dict:
     return {"status": "ok", "pie_id": pie_id, "message": f"Pie '{name}' created."}
 
 
-def get_pies() -> list:
-    cursor.execute("SELECT id, name, created_at FROM pies ORDER BY created_at DESC")
+def get_pies(user_id: int) -> list:
+    cursor.execute("SELECT id, name, created_at FROM pies WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
     pies = []
     for pid, name, created_at in cursor.fetchall():
         cursor.execute("SELECT symbol, percent FROM pie_slices WHERE pie_id = ?", (pid,))
@@ -588,7 +597,7 @@ def get_pies() -> list:
             symbol = r[0]
             price = get_price(symbol)
             # Check how much of this stock the user holds
-            cursor.execute("SELECT amount FROM holdings WHERE symbol = ?", (symbol,))
+            cursor.execute("SELECT amount FROM holdings WHERE user_id = ? AND symbol = ?", (user_id, symbol))
             hrow = cursor.fetchone()
             held = hrow[0] if hrow else 0
             value_held = round(held * price, 2)
@@ -598,18 +607,18 @@ def get_pies() -> list:
     return pies
 
 
-def delete_pie(pie_id: int) -> dict:
-    cursor.execute("DELETE FROM pie_slices WHERE pie_id = ?", (pie_id,))
-    cursor.execute("DELETE FROM pies WHERE id = ?", (pie_id,))
+def delete_pie(user_id: int, pie_id: int) -> dict:
+    cursor.execute("DELETE FROM pie_slices WHERE pie_id IN (SELECT id FROM pies WHERE id = ? AND user_id = ?)", (pie_id, user_id))
+    cursor.execute("DELETE FROM pies WHERE id = ? AND user_id = ?", (pie_id, user_id))
     conn.commit()
     if cursor.rowcount == 0:
         return {"error": "Pie not found."}
     return {"status": "ok"}
 
 
-def update_pie(pie_id: int, name: str, slices: list) -> dict:
+def update_pie(user_id: int, pie_id: int, name: str, slices: list) -> dict:
     """Update an existing pie's name and slices."""
-    cursor.execute("SELECT id FROM pies WHERE id = ?", (pie_id,))
+    cursor.execute("SELECT id FROM pies WHERE id = ? AND user_id = ?", (pie_id, user_id))
     if not cursor.fetchone():
         return {"error": "Pie not found."}
     if not name:
@@ -643,11 +652,11 @@ def update_pie(pie_id: int, name: str, slices: list) -> dict:
     return {"status": "ok", "message": f"Pie '{name}' updated."}
 
 
-def buy_pie(pie_id: int, total_amount: float) -> dict:
+def buy_pie(user_id: int, pie_id: int, total_amount: float) -> dict:
     """Buy stocks according to pie allocation for a given dollar amount."""
     if total_amount <= 0:
         return {"error": "Amount must be positive."}
-    cursor.execute("SELECT symbol, percent FROM pie_slices WHERE pie_id = ?", (pie_id,))
+    cursor.execute("SELECT symbol, percent FROM pie_slices WHERE pie_id IN (SELECT id FROM pies WHERE id = ? AND user_id = ?)", (pie_id, user_id))
     slices = cursor.fetchall()
     if not slices:
         return {"error": "Pie not found or has no stocks."}
@@ -667,7 +676,7 @@ def buy_pie(pie_id: int, total_amount: float) -> dict:
             results.append({"symbol": symbol, "error": "Allocation too small to buy any shares."})
             fail_count += 1
             continue
-        res = buy_stock(symbol, round(shares, 6))
+        res = buy_stock(user_id, symbol, round(shares, 6))
         if res.get("status") == "ok":
             success_count += 1
         else:

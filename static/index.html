@@ -13,6 +13,10 @@
             <nav>
                 <a href="#market" id="nav-market">Market</a>
                 <a href="#portfolio" id="nav-portfolio">Portfolio</a>
+                <span id="user-info" style="display:none; margin-left:auto; display:flex; align-items:center; gap:0.5rem;">
+                    <span style="color:var(--text-muted); font-size:0.9rem;" id="username-display"></span>
+                    <a href="#" onclick="logout(); return false;" style="background:rgba(245,101,101,0.3); border-color:rgba(245,101,101,0.4); color:#f56565; font-size:0.85rem; padding:0.5rem 1rem;">Logout</a>
+                </span>
             </nav>
         </div>
     </header>
@@ -296,6 +300,36 @@
     <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
     <script src="/static/script.js"></script>
     <script>
+        // ── Auth: redirect to login if not authenticated ──
+        async function checkAuth() {
+            try {
+                const res = await fetch('/api/auth/me');
+                if (!res.ok) { window.location.href = '/login'; return; }
+                const data = await res.json();
+                const userInfo = document.getElementById('user-info');
+                const usernameEl = document.getElementById('username-display');
+                if (userInfo) userInfo.style.display = 'flex';
+                if (usernameEl) usernameEl.textContent = data.username;
+            } catch(e) {
+                window.location.href = '/login';
+            }
+        }
+
+        async function logout() {
+            await fetch('/api/auth/logout', {method: 'POST'});
+            window.location.href = '/login';
+        }
+
+        // Intercept API 401 responses globally
+        const _origFetch = window.fetch;
+        window.fetch = async function(...args) {
+            const res = await _origFetch(...args);
+            if (res.status === 401 && typeof args[0] === 'string' && args[0].startsWith('/api/') && !args[0].includes('/auth/')) {
+                window.location.href = '/login';
+            }
+            return res;
+        };
+
         function showView(hash) {
             const marketVisible = !hash || hash === '#market';
             document.getElementById('view-market').style.display = marketVisible ? '' : 'none';
@@ -316,13 +350,15 @@
         }
         window.addEventListener('hashchange', () => showView(location.hash));
         window.addEventListener('DOMContentLoaded', () => {
-            showView(location.hash || '#market');
-            refreshBalanceBar();
-            setInterval(checkOrders, 30000);
-            // Setup autocomplete on symbol inputs
-            setupAutocomplete('symbol', 'symbol-dropdown', function(sym) { loadPrice(); });
-            setupAutocomplete('bt-symbol', 'bt-symbol-dropdown');
-            setupAutocomplete('pie-sym-init', 'pie-sym-init-dd');
+            checkAuth().then(() => {
+                showView(location.hash || '#market');
+                refreshBalanceBar();
+                setInterval(checkOrders, 30000);
+                // Setup autocomplete on symbol inputs
+                setupAutocomplete('symbol', 'symbol-dropdown', function(sym) { loadPrice(); });
+                setupAutocomplete('bt-symbol', 'bt-symbol-dropdown');
+                setupAutocomplete('pie-sym-init', 'pie-sym-init-dd');
+            });
         });
     </script>
 </body>
