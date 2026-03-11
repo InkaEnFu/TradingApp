@@ -177,9 +177,9 @@
     </div>
 
     <script>
-        // Check if already logged in - redirect immediately
+        // Check if already logged in
         fetch('/api/auth/me').then(r => {
-            if(r.ok) window.location.replace('/');
+            if(r.ok) window.location.href = '/';
         });
 
         function switchTab(tab) {

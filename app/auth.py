@@ -15,18 +15,15 @@ import secrets
 
 from .database import cursor, conn
 
-# ── Secret key (env var for production, file fallback for local dev) ───
-if os.environ.get("SECRET_KEY"):
-    SECRET_KEY = os.environ["SECRET_KEY"]
+# ── Persistent secret key (generated once, reused across restarts) ───
+_key_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".secret_key")
+if os.path.exists(_key_path):
+    with open(_key_path) as _f:
+        SECRET_KEY = _f.read().strip()
 else:
-    _key_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".secret_key")
-    if os.path.exists(_key_path):
-        with open(_key_path) as _f:
-            SECRET_KEY = _f.read().strip()
-    else:
-        SECRET_KEY = secrets.token_hex(32)
-        with open(_key_path, "w") as _f:
-            _f.write(SECRET_KEY)
+    SECRET_KEY = secrets.token_hex(32)
+    with open(_key_path, "w") as _f:
+        _f.write(SECRET_KEY)
 
 
 # ── Password hashing ────────────────────────────────────────────────
