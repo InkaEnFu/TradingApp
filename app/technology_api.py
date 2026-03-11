@@ -2,9 +2,47 @@ from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 import yfinance as yf
 import requests
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from .stock_categories import stocks_by_category
 
 router = APIRouter()
+
+# ── Server-side cache for stock prices ──
+_price_cache = {}
+_CACHE_TTL = 300  # 5 minutes
+
+def _get_cached_price(symbol: str):
+    """Get price from cache if fresh, otherwise return None."""
+    if symbol in _price_cache:
+        data, ts = _price_cache[symbol]
+        if time.time() - ts < _CACHE_TTL:
+            return data
+    return None
+
+def _set_cached_price(symbol: str, data: dict):
+    """Store price in cache."""
+    _price_cache[symbol] = (data, time.time())
+
+def _fetch_single_price(symbol: str) -> dict:
+    """Fetch price for a single symbol (used in thread pool)."""
+    cached = _get_cached_price(symbol)
+    if cached:
+        return cached
+    try:
+        ticker = yf.Ticker(symbol)
+        info = ticker.info
+        price = info.get("regularMarketPrice")
+        prev_close = info.get("regularMarketPreviousClose")
+        if price is not None and prev_close is not None and prev_close != 0:
+            change_percent = round(((price - prev_close) / prev_close) * 100, 2)
+        else:
+            change_percent = None
+        result = {"price": price, "change_percent": change_percent}
+    except Exception:
+        result = {"price": None, "change_percent": None}
+    _set_cached_price(symbol, result)
+    return result
 
 # Build a flat list of all known symbols for autocomplete
 _all_symbols = []
@@ -66,29 +104,35 @@ def search_symbols(q: str = Query("", min_length=0)):
 
 @router.get("/stocks-by-category")
 def get_stocks_by_category():
+    # Collect all unique symbols
+    all_symbols = set()
+    for stocks in stocks_by_category.values():
+        for stock in stocks:
+            all_symbols.add(stock["symbol"])
+    
+    # Fetch prices in parallel (max 10 threads)
+    prices = {}
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_symbol = {executor.submit(_fetch_single_price, sym): sym for sym in all_symbols}
+        for future in as_completed(future_to_symbol):
+            symbol = future_to_symbol[future]
+            try:
+                prices[symbol] = future.result()
+            except Exception:
+                prices[symbol] = {"price": None, "change_percent": None}
+    
+    # Build result
     result = {}
     for category, stocks in stocks_by_category.items():
         enriched = []
         for stock in stocks:
             symbol = stock["symbol"]
-            name = stock["name"]
-            try:
-                ticker = yf.Ticker(symbol)
-                info = ticker.info
-                price = info.get("regularMarketPrice")
-                prev_close = info.get("regularMarketPreviousClose")
-                if price is not None and prev_close is not None and prev_close != 0:
-                    change_percent = round(((price - prev_close) / prev_close) * 100, 2)
-                else:
-                    change_percent = None
-            except Exception:
-                price = None
-                change_percent = None
+            price_data = prices.get(symbol, {"price": None, "change_percent": None})
             enriched.append({
                 "symbol": symbol,
-                "name": name,
-                "price": price,
-                "change_percent": change_percent
+                "name": stock["name"],
+                "price": price_data["price"],
+                "change_percent": price_data["change_percent"]
             })
         result[category] = enriched
     return result

@@ -830,20 +830,29 @@ async function deletePie(pieId) {
 }
 
 // ===== CATEGORIES =====
-async function loadStocksByCategory() {
+async function loadStocksByCategory(forceRefresh = false) {
     const container = document.getElementById('stocks-categories');
     if(!container) return;
-    if(container.getAttribute('data-loaded')==='1') return;
+    
+    // Show cached data immediately if available
     const stored = loadFromStorage(STORAGE_KEYS.stocksCategories);
-    if(stored) renderStocksCategories(stored.data);
-    else container.innerHTML = '<p>Loading...</p>';
+    if(stored && stored.data) {
+        renderStocksCategories(stored.data);
+    } else {
+        container.innerHTML = '<p style=\"color:var(--text-muted);\">Loading prices...</p>';\n    }
+    
+    // Skip fetch if already loaded and not forcing refresh
+    if(!forceRefresh && container.getAttribute('data-loaded')==='1' && stored) return;
+    
     try {
         const res = await fetch('/api/stocks-by-category');
         const data = await res.json();
         saveToStorage(STORAGE_KEYS.stocksCategories, data);
         renderStocksCategories(data);
         container.setAttribute('data-loaded','1');
-    } catch(e) { if(!stored) container.innerHTML = '<p>Error loading categories.</p>'; }
+    } catch(e) { 
+        if(!stored) container.innerHTML = '<p class=\"negative\">Error loading categories.</p>'; 
+    }
 }
 
 let currentCategory = null;
