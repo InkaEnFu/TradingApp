@@ -11,4 +11,4 @@ if __name__ == "__main__":
     p.start()
 
     time.sleep(1)
-    webbrowser.open("http://127.0.0.1:8000")
+    webbrowser.open("http://127.0.0.1:8000/login")

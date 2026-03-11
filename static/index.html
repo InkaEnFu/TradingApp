@@ -304,19 +304,21 @@
         async function checkAuth() {
             try {
                 const res = await fetch('/api/auth/me');
-                if (!res.ok) { window.location.href = '/login'; return; }
+                if (!res.ok) { localStorage.clear(); window.location.href = '/login'; return; }
                 const data = await res.json();
                 const userInfo = document.getElementById('user-info');
                 const usernameEl = document.getElementById('username-display');
                 if (userInfo) userInfo.style.display = 'flex';
                 if (usernameEl) usernameEl.textContent = data.username;
             } catch(e) {
+                localStorage.clear();
                 window.location.href = '/login';
             }
         }
 
         async function logout() {
             await fetch('/api/auth/logout', {method: 'POST'});
+            localStorage.clear();
             window.location.href = '/login';
         }
 
@@ -325,6 +327,7 @@
         window.fetch = async function(...args) {
             const res = await _origFetch(...args);
             if (res.status === 401 && typeof args[0] === 'string' && args[0].startsWith('/api/') && !args[0].includes('/auth/')) {
+                localStorage.clear();
                 window.location.href = '/login';
             }
             return res;
