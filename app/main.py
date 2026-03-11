@@ -83,7 +83,7 @@ async def api_register(request: Request):
     resp = JSONResponse({"status": "ok", "username": result["username"]})
     resp.set_cookie(
         key="auth_token", value=result["token"],
-        httponly=True, samesite="lax",
+        httponly=True, samesite="lax", max_age=86400,
     )
     return resp
 
@@ -99,7 +99,7 @@ async def api_login(request: Request):
     resp = JSONResponse({"status": "ok", "username": result["username"]})
     resp.set_cookie(
         key="auth_token", value=result["token"],
-        httponly=True, samesite="lax",
+        httponly=True, samesite="lax", max_age=86400,
     )
     return resp
 

@@ -5,8 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Investment Simulator</title>
     <link rel="stylesheet" href="/static/style.css">
+    <style>#app-loading{position:fixed;inset:0;background:var(--bg-dark,#0a0a0a);display:flex;align-items:center;justify-content:center;z-index:9999;}.spinner{width:40px;height:40px;border:3px solid rgba(107,70,193,0.3);border-top-color:#6b46c1;border-radius:50%;animation:spin 0.8s linear infinite;}@keyframes spin{to{transform:rotate(360deg);}}</style>
 </head>
 <body>
+    <div id="app-loading"><div class="spinner"></div></div>
     <header>
         <div class="container">
             <h1>Investment Simulator</h1>
@@ -304,22 +306,28 @@
         async function checkAuth() {
             try {
                 const res = await fetch('/api/auth/me');
-                if (!res.ok) { localStorage.clear(); window.location.href = '/login'; return; }
+                if (!res.ok) { 
+                    localStorage.clear(); 
+                    window.location.replace('/login'); 
+                    return false; 
+                }
                 const data = await res.json();
                 const userInfo = document.getElementById('user-info');
                 const usernameEl = document.getElementById('username-display');
                 if (userInfo) userInfo.style.display = 'flex';
                 if (usernameEl) usernameEl.textContent = data.username;
+                return true;
             } catch(e) {
                 localStorage.clear();
-                window.location.href = '/login';
+                window.location.replace('/login');
+                return false;
             }
         }
 
         async function logout() {
             await fetch('/api/auth/logout', {method: 'POST'});
             localStorage.clear();
-            window.location.href = '/login';
+            window.location.replace('/login');
         }
 
         // Intercept API 401 responses globally
@@ -328,7 +336,7 @@
             const res = await _origFetch(...args);
             if (res.status === 401 && typeof args[0] === 'string' && args[0].startsWith('/api/') && !args[0].includes('/auth/')) {
                 localStorage.clear();
-                window.location.href = '/login';
+                window.location.replace('/login');
             }
             return res;
         };
@@ -351,17 +359,24 @@
             }
             refreshBalanceBar();
         }
+
+        function hideLoading() {
+            const loader = document.getElementById('app-loading');
+            if (loader) loader.style.display = 'none';
+        }
+
         window.addEventListener('hashchange', () => showView(location.hash));
-        window.addEventListener('DOMContentLoaded', () => {
-            checkAuth().then(() => {
-                showView(location.hash || '#market');
-                refreshBalanceBar();
-                setInterval(checkOrders, 30000);
-                // Setup autocomplete on symbol inputs
-                setupAutocomplete('symbol', 'symbol-dropdown', function(sym) { loadPrice(); });
-                setupAutocomplete('bt-symbol', 'bt-symbol-dropdown');
-                setupAutocomplete('pie-sym-init', 'pie-sym-init-dd');
-            });
+        window.addEventListener('DOMContentLoaded', async () => {
+            const authed = await checkAuth();
+            if (!authed) return; // Redirect is happening
+            hideLoading();
+            showView(location.hash || '#market');
+            refreshBalanceBar();
+            setInterval(checkOrders, 30000);
+            // Setup autocomplete on symbol inputs
+            setupAutocomplete('symbol', 'symbol-dropdown', function(sym) { loadPrice(); });
+            setupAutocomplete('bt-symbol', 'bt-symbol-dropdown');
+            setupAutocomplete('pie-sym-init', 'pie-sym-init-dd');
         });
     </script>
 </body>

@@ -177,12 +177,9 @@
     </div>
 
     <script>
-        // Clear any stale cached data on login page
-        localStorage.clear();
-
-        // Check if already logged in
+        // Check if already logged in - redirect immediately
         fetch('/api/auth/me').then(r => {
-            if(r.ok) window.location.href = '/';
+            if(r.ok) window.location.replace('/');
         });
 
         function switchTab(tab) {
