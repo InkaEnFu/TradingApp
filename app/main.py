@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
     task.cancel()
 
 
-app = FastAPI(title="Local Investment Simulator", lifespan=lifespan)
+app = FastAPI(title="ZenTrade", lifespan=lifespan)
 
 # Serve static files (HTML, JS)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

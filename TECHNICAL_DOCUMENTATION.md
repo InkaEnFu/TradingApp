@@ -1,4 +1,4 @@
-# Technical Documentation – Investment Simulator
+# Technical Documentation – ZenTrade
 
 ## Table of Contents
 
@@ -24,7 +24,7 @@
 
 ## 1. Project Overview
 
-**Investment Simulator** is a web application for simulating investments on financial markets. It enables users to trade stocks, cryptocurrencies, forex, and commodities using real market data from Yahoo Finance – without any risk of losing real money.
+**ZenTrade** is a web application for simulating investments on financial markets. It enables users to trade stocks, cryptocurrencies, forex, and commodities using real market data from Yahoo Finance – without any risk of losing real money.
 
 ### Key Features
 

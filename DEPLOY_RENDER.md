@@ -2,7 +2,7 @@
 
 ## Přehled
 
-Tento návod krok za krokem popisuje, jak nahrát Investment Simulator na hosting **Render** (https://dashboard.render.com/).
+Tento návod krok za krokem popisuje, jak nahrát ZenTrade na hosting **Render** (https://dashboard.render.com/).
 
 ---
 
