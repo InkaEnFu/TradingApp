@@ -1,4 +1,4 @@
-# Technická dokumentace – ZenTrade
+# Technická dokumentace – Investment Simulator
 
 ## Obsah
 
@@ -24,7 +24,7 @@
 
 ## 1. Přehled projektu
 
-**ZenTrade** je webová aplikace pro simulaci investování na finančních trzích. Aplikace umožňuje uživatelům obchodovat s akciemi, kryptoměnami, forexem a komoditami s využitím reálných tržních dat z Yahoo Finance – bez rizika ztráty skutečných peněz.
+**Investment Simulator** je webová aplikace pro simulaci investování na finančních trzích. Aplikace umožňuje uživatelům obchodovat s akciemi, kryptoměnami, forexem a komoditami s využitím reálných tržních dat z Yahoo Finance – bez rizika ztráty skutečných peněz.
 
 ### Hlavní funkce
 

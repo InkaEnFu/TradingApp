@@ -1,27 +1,3 @@
-// ===== MOBILE NAV =====
-function toggleNav() {
-    const nav = document.getElementById('main-nav');
-    const btn = document.getElementById('hamburger-btn');
-    const open = nav.classList.toggle('open');
-    btn.classList.toggle('open', open);
-    btn.setAttribute('aria-expanded', open);
-}
-function closeNav() {
-    const nav = document.getElementById('main-nav');
-    const btn = document.getElementById('hamburger-btn');
-    nav.classList.remove('open');
-    btn.classList.remove('open');
-    btn.setAttribute('aria-expanded', 'false');
-}
-// Close nav when clicking outside
-document.addEventListener('click', function(e) {
-    const nav = document.getElementById('main-nav');
-    const btn = document.getElementById('hamburger-btn');
-    if (nav && btn && nav.classList.contains('open') && !nav.contains(e.target) && !btn.contains(e.target)) {
-        closeNav();
-    }
-});
-
 // ===== CACHE =====
 const _cache = { price: new Map(), portfolio: null, portfolioHistory: null };
 const STORAGE_KEYS = { portfolio: 'cached_portfolio', portfolioHistory: 'cached_portfolioHistory', stocksCategories: 'cached_stocksCategories' };

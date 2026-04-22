@@ -1,4 +1,4 @@
-# Uživatelský manuál – ZenTrade
+# Uživatelský manuál – Investment Simulator
 
 ## Obsah
 
@@ -34,7 +34,7 @@
 
 ## 1. Úvod
 
-**ZenTrade** je lokální webová aplikace pro simulaci investování na finančních trzích. Aplikace umožňuje obchodovat s akciemi, kryptoměnami, forexem a komoditami s využitím reálných tržních dat z Yahoo Finance – vše bez rizika ztráty skutečných peněz.
+**Investment Simulator** je lokální webová aplikace pro simulaci investování na finančních trzích. Aplikace umožňuje obchodovat s akciemi, kryptoměnami, forexem a komoditami s využitím reálných tržních dat z Yahoo Finance – vše bez rizika ztráty skutečných peněz.
 
 Hlavní funkce:
 - Virtuální účet s počátečním zůstatkem **$100 000**
@@ -441,4 +441,4 @@ investment_app/
 
 ---
 
-*ZenTrade – lokální simulátor investování pro vzdělávací účely. Nejedná se o finanční poradenství.*
+*Investment Simulator – lokální simulátor investování pro vzdělávací účely. Nejedná se o finanční poradenství.*

@@ -1,4 +1,4 @@
-# ZenTrade
+# Investment Simulator
 
 Webová aplikace simulující obchodování na burze s reálnými cenami akcií, kryptoměn, forexu a komodit. Každý uživatel začíná s virtuálním kapitálem **$100 000** a může obchodovat bez rizika ztráty reálných peněz.
 

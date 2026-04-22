@@ -3,20 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ZenTrade</title>
+    <title>Investment Simulator</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
     <header>
-        <div class="container header-inner">
-            <h1>ZenTrade</h1>
-            <button class="hamburger" id="hamburger-btn" onclick="toggleNav()" aria-label="Toggle navigation" aria-expanded="false">
-                <span></span><span></span><span></span>
-            </button>
-            <nav id="main-nav">
-                <a href="#market" id="nav-market" onclick="closeNav()">Market</a>
-                <a href="#portfolio" id="nav-portfolio" onclick="closeNav()">Portfolio</a>
-                <span id="user-info" class="user-info-nav" style="display:none;">
+        <div class="container">
+            <h1>Investment Simulator</h1>
+            <nav>
+                <a href="#market" id="nav-market">Market</a>
+                <a href="#portfolio" id="nav-portfolio">Portfolio</a>
+                <span id="user-info" style="display:none; margin-left:auto; display:flex; align-items:center; gap:0.5rem;">
                     <span style="color:var(--text-muted); font-size:0.9rem;" id="username-display"></span>
                     <a href="#" onclick="logout(); return false;" style="background:rgba(245,101,101,0.3); border-color:rgba(245,101,101,0.4); color:#f56565; font-size:0.85rem; padding:0.5rem 1rem;">Logout</a>
                 </span>
